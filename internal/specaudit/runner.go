@@ -88,6 +88,14 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		calls := goTest("audio/portaudio", "-race", "./...")
 		calls[0].env = []string{"CGO_ENABLED=1"}
 		return calls, nil
+	case "alsa":
+		calls := goTest("audio/alsa", "-race", "./...")
+		calls[0].env = []string{"CGO_ENABLED=1", "SENDSPIN_ALSA_SILENCE_DEVICE="}
+		return calls, nil
+	case "desktop-audio":
+		calls := goTest("audio/native", "-race", "./...")
+		calls[0].env = []string{"CGO_ENABLED=1", "CGO_CFLAGS_ALLOW=-fno-strict-overflow", "SENDSPIN_PIPEWIRE_ISOLATED="}
+		return calls, nil
 	case "native-example":
 		calls := append(goTest("_examples/player", "-race", "./..."), goTest("_examples/audio-probe", "-race", "./...")...)
 		for i := range calls {
@@ -336,6 +344,10 @@ func suiteScope(suite string) string {
 		return "Bounded host fuzz campaigns; not exhaustive input coverage"
 	case "portaudio", "native-example":
 		return "Host native build/callback/selection tests; no physical output measurement"
+	case "alsa":
+		return "Linux ALSA ABI with discard-only null PCM and fake timing/lifecycle tests; no physical device, capture or synchronization measurement"
+	case "desktop-audio":
+		return "Host direct PipeWire/WASAPI/CoreAudio build, C clock/callback ABI and fake queue/lifecycle tests; no audio device or server connection, capture or physical measurement"
 	case "examples":
 		return "CGO-free example selection tests; no audio device"
 	}

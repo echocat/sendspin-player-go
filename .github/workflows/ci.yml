@@ -33,6 +33,16 @@ jobs:
       - run: go mod tidy -diff
       - name: Record CGO-free example tests
         run: go run ./internal/specauditcmd run --suite examples
+      - name: Test the ALSA unavailable-platform stub without CGO or hardware
+        working-directory: audio/alsa
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 ./...
+      - name: Test direct desktop outputs without CGO or hardware
+        working-directory: audio/native
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 ./...
       - name: Build the Oto-only example without CGO
         working-directory: _examples/player
         env:
@@ -151,10 +161,49 @@ jobs:
           name: spec-evidence-native-attempt-${{ github.run_attempt }}
           path: var/audit/evidence
           if-no-files-found: warn
+  alsa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: mise run lint:alsa
+      - run: mise run test:alsa
+      - run: go run ./internal/specauditcmd report --profile alsa --output var/audit/alsa
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-alsa-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/evidence
+            var/audit/alsa
+          if-no-files-found: warn
+  desktop-audio:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev
+      - run: mise run lint:desktop-audio
+      - run: mise run test:desktop-audio
+      - run: go run ./internal/specauditcmd report --profile desktop-audio --output var/audit/desktop-audio
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-desktop-audio-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/evidence
+            var/audit/desktop-audio
+          if-no-files-found: warn
   spec-report:
     name: RC1 traceability (not certification)
     if: always()
-    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build]
+    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build, alsa, desktop-audio]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -176,6 +225,12 @@ jobs:
       - name: Generate and gate native build/callback evidence (not physical measurements)
         if: always()
         run: go run ./internal/specauditcmd report --profile native --evidence var/audit/ci --output var/audit/native --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Gate separate Linux ALSA ABI/fake-device evidence (no physical measurements)
+        if: always()
+        run: go run ./internal/specauditcmd report --profile alsa --evidence var/audit/ci --output var/audit/alsa --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Gate separate direct desktop clock/callback evidence (no physical measurements)
+        if: always()
+        run: go run ./internal/specauditcmd report --profile desktop-audio --evidence var/audit/ci --output var/audit/desktop-audio --goos linux --goarch amd64 --go-version go1.27.3
       - name: Publish traceability summary
         if: always()
         shell: bash
@@ -192,4 +247,6 @@ jobs:
             var/audit/report.md
             var/audit/summary.md
             var/audit/native
+            var/audit/alsa
+            var/audit/desktop-audio
           if-no-files-found: warn

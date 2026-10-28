@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,20 @@ func TestRealRunRejectsUnknownSuiteWithoutExecutingIt(t *testing.T) {
 	p := fixture(t)
 	if _, err := p.invocations("not-a-suite", false); err == nil {
 		t.Fatal("accepted arbitrary execution profile")
+	}
+}
+
+func TestALSASuitePinsHardwareOptOutAndDoesNotInheritEvidence(t *testing.T) {
+	p := fixture(t)
+	calls, err := p.invocations("alsa", false)
+	if err != nil || len(calls) != 1 || calls[0].dir != "audio/alsa" || !slices.Contains(calls[0].env, "CGO_ENABLED=1") || !slices.Contains(calls[0].env, "SENDSPIN_ALSA_SILENCE_DEVICE=") {
+		t.Fatal("ALSA suite must not inherit a hardware-test opt-in", calls, err)
+	}
+	report, err := p.Report(ReportOptions{Profile: "alsa"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(report.Problems, "required suite alsa: not-run") || report.ConformanceClaim {
+		t.Fatal("ALSA native/physical evidence was invented", report.Problems)
 	}
 }

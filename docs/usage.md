@@ -241,10 +241,16 @@ audibility, and startup artifacts still need hardware/loopback verification.
 | --- | --- | --- | --- |
 | `audio/portaudio` | Independent Go module; CGO plus PortAudio headers/library | Native DAC timestamps and stream clock | Native driver behavior; blocking C calls cannot be interrupted by Go context |
 | `audio/oto` | Oto v3.5.1; Windows/macOS/Linux can build without CGO | Explicitly enabled software-queue/latency estimate, no device clock | Clears SDK/player software queues only; downstream audio tail may remain |
+| `audio/alsa` (unreleased) | Independent Linux module; CGO plus libasound headers/library; no Oto/PortAudio | MONOTONIC PCM status and reported delay; non-HW plugins require explicit opt-in | Native drop and conservative reported-tail wait; driver/FIFO accuracy unmeasured |
+| `audio/native` (unreleased) | Independent CGO module; PipeWire on Linux, system WASAPI on Windows, Apple frameworks on macOS | Native graph/endpoint/host clocks and bounded callback queue | Native stop/reset and reported-tail wait; physical downstream behavior unmeasured |
 
-Neither backend has a physical +/-1-ms certification. PortAudio is the preferred
-choice when hardware feedback is required; Oto is the convenient best-effort
-choice when its limits are acceptable.
+No backend has a physical +/-1-ms certification. PortAudio is the released
+cross-platform choice when hardware feedback is required; Oto is the convenient
+best-effort choice when its limits are acceptable. The new direct Linux ALSA
+implementation and its separate validation scope are described in
+[Linux ALSA output](linux-alsa.md); it is not included in v0.1.1.
+Direct desktop APIs and their platform-specific build/evidence boundaries are
+documented in [native desktop outputs](native-desktop-audio.md).
 
 ## Native PortAudio backend
 

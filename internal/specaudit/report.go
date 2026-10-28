@@ -117,6 +117,10 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 		required = FullSuites
 	case "native":
 		required = []string{"portaudio", "native-example"}
+	case "alsa":
+		required = []string{"alsa"}
+	case "desktop-audio":
+		required = []string{"desktop-audio"}
 	default:
 		return Report{}, fmt.Errorf("unknown evidence profile %q", options.Profile)
 	}
@@ -142,7 +146,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 				return nil
 			}
 			pathSuite := filepath.Base(filepath.Dir(filepath.Dir(path)))
-			if !slices.Contains(append(slices.Clone(FullSuites), "portaudio", "native-example"), pathSuite) {
+			if !slices.Contains(append(slices.Clone(FullSuites), "portaudio", "native-example", "alsa", "desktop-audio"), pathSuite) {
 				return nil
 			}
 			manifest, directory, err := readManifest(path)
@@ -208,7 +212,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 	} else if !os.IsNotExist(err) {
 		return report, err
 	}
-	allSuites := append(slices.Clone(FullSuites), "portaudio", "native-example")
+	allSuites := append(slices.Clone(FullSuites), "portaudio", "native-example", "alsa", "desktop-audio")
 	for _, suite := range allSuites {
 		value, ok := suites[suite]
 		status := "not-run"

@@ -151,6 +151,10 @@ func Discover(root string) (Inventory, error) {
 				suite = "fuzz"
 			case moduleRoot == "audio/portaudio":
 				suite = "portaudio"
+			case moduleRoot == "audio/alsa":
+				suite = "alsa"
+			case moduleRoot == "audio/native":
+				suite = "desktop-audio"
 			case strings.HasPrefix(moduleRoot, "_examples/"):
 				suite = "examples"
 			case active():
@@ -181,7 +185,7 @@ func Discover(root string) (Inventory, error) {
 func Fingerprint(root string) (string, error) {
 	hash := sha256.New()
 	err := walkInputs(root, func(relative string, data []byte) error {
-		if slices.Contains([]string{".go", ".md", ".json", ".toml", ".yaml", ".yml", ".py", ".cpp", ".h", ".sh", ".ps1", ".txt", ".lock"}, path.Ext(relative)) || slices.Contains([]string{"go.mod", "go.sum", ".python-version", ".gitattributes", ".gitignore", "LICENSE"}, path.Base(relative)) {
+		if slices.Contains([]string{".go", ".md", ".json", ".toml", ".yaml", ".yml", ".py", ".c", ".cpp", ".h", ".sh", ".ps1", ".txt", ".lock"}, path.Ext(relative)) || slices.Contains([]string{"go.mod", "go.sum", ".python-version", ".gitattributes", ".gitignore", "LICENSE"}, path.Base(relative)) {
 			data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 		}
 		_, _ = fmt.Fprintf(hash, "%s\x00%d\x00", relative, len(data))

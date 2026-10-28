@@ -95,7 +95,11 @@ requires CGO automatically; there is no custom PortAudio build tag.
 
 Credentials default to the operating system's user-config directory, not the source
 tree. This is an example application, not a production-ready packaged player.
-See [both backends and their limitations](docs/usage.md#audio-backend-comparison).
+See [backends and their limitations](docs/usage.md#audio-backend-comparison).
+Development now also includes an optional [direct Linux ALSA module](docs/linux-alsa.md),
+independent of Oto/PortAudio; it is not part of the published v0.1.1 release.
+The optional [native desktop module](docs/native-desktop-audio.md) adds direct
+PipeWire, WASAPI and CoreAudio outputs; it is also unreleased.
 
 ## Develop and test
 

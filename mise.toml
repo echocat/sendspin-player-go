@@ -35,7 +35,17 @@ depends = ["format:examples:player", "format:examples:audio-probe"]
 
 [tasks."format:backends"]
 description = "Format independent audio backend modules"
-depends = ["format:backends:portaudio"]
+depends = ["format:backends:portaudio", "format:backends:alsa", "format:backends:desktop"]
+
+[tasks."format:backends:desktop"]
+description = "Format and tidy the independent direct desktop audio module"
+dir = "audio/native"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
+
+[tasks."format:backends:alsa"]
+description = "Format and tidy the independent Linux ALSA module"
+dir = "audio/alsa"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
 
 [tasks."format:backends:portaudio"]
 description = "Format and tidy the independent PortAudio module"
@@ -65,7 +75,7 @@ run = "go mod tidy"
 
 [tasks."format:check"]
 description = "Check golangci-lint formatting without changing files"
-depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:examples:player:format", "lint:examples:audio-probe"]
+depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:backends:alsa", "lint:examples:player:format", "lint:examples:audio-probe"]
 
 [tasks."format:examples:audio-probe"]
 description = "Format and tidy the standalone output validation example"
@@ -117,7 +127,53 @@ depends = ["lint:examples:player", "lint:examples:audio-probe"]
 
 [tasks."lint:backends"]
 description = "Check independent backend formatting and module files"
-depends = ["lint:backends:portaudio"]
+depends = ["lint:backends:portaudio", "lint:backends:alsa", "lint:backends:desktop"]
+
+[tasks."lint:backends:desktop"]
+description = "Check direct desktop output formatting, dependencies and CGO-free stubs"
+dir = "audio/native"
+env.CGO_ENABLED = "0"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...', 'golangci-lint run --config "{{config_root}}/.golangci.yaml"']
+
+[tasks."lint:desktop-audio"]
+description = "Lint host PipeWire/WASAPI/CoreAudio code with its native SDK"
+dir = "audio/native"
+env.CGO_ENABLED = "1"
+env.CGO_CFLAGS_ALLOW = "-fno-strict-overflow"
+run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+
+[tasks."test:desktop-audio"]
+description = "Record native build/clock/callback ABI and fake playback evidence without audio devices or servers"
+run = "go run ./internal/specauditcmd run --suite desktop-audio"
+
+[tasks."test:desktop-audio:stub"]
+description = "Test native output stubs and fake queue without a C compiler"
+dir = "audio/native"
+env.CGO_ENABLED = "0"
+run = "go test -count=1 ./..."
+
+[tasks."lint:backends:alsa"]
+description = "Check ALSA formatting/dependencies and unavailable-platform stub without native headers"
+dir = "audio/alsa"
+env.CGO_ENABLED = "0"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...', 'golangci-lint run --config "{{config_root}}/.golangci.yaml"']
+
+[tasks."lint:alsa"]
+description = "Lint native Linux ALSA implementation (libasound development files required)"
+dir = "audio/alsa"
+env.CGO_ENABLED = "1"
+run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+
+[tasks."test:alsa"]
+description = "Record Linux ALSA native null-PCM and fake-device evidence, without opening hardware"
+run = "go run ./internal/specauditcmd run --suite alsa"
+
+[tasks."test:alsa:stub"]
+description = "Test ALSA fake devices and unavailable-native-platform behavior without CGO"
+dir = "audio/alsa"
+env.CGO_ENABLED = "0"
+env.SENDSPIN_ALSA_SILENCE_DEVICE = ""
+run = "go test -count=1 ./..."
 
 [tasks."lint:backends:portaudio"]
 depends = ["lint:backends:portaudio:format", "lint:backends:portaudio:mod"]
