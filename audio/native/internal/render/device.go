@@ -94,6 +94,9 @@ func Open(ctx context.Context, c Config, f audio.Format, factory Factory) (audio
 	d.op <- struct{}{}
 	d.driver, err = factory(d)
 	if err != nil {
+		if d.driver != nil {
+			err = errors.Join(err, d.driver.Close())
+		}
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
@@ -130,7 +133,8 @@ func (d *Device) Process(out []float32, first int64) {
 	native := d.driver.Clock()
 	after := d.now()
 	window := after.Sub(before)
-	if first <= 0 || native <= 0 || window < 0 || window > d.config.MaxTimingWindow || first < native-int64(time.Second) || first > native+int64(2*time.Second) {
+	period := time.Duration(len(out)/d.format.Channels) * time.Second / time.Duration(d.format.SampleRate)
+	if first <= 0 || native <= 0 || window < 0 || window > d.config.MaxTimingWindow || first < native-int64(period+d.config.MaxTimingWindow) || first > native+int64(2*time.Second) {
 		// Inactive/startup streams can report no clock for their first cycles.
 		// Only zeros can be queued before readiness; wait for genuine timing.
 		if !d.ready && d.size == 0 {
@@ -214,6 +218,8 @@ func (d *Device) ensureStarted(ctx context.Context) error {
 	}
 	timer := time.NewTimer(d.config.StartupTimeout)
 	defer timer.Stop()
+	health := time.NewTicker(100 * time.Millisecond)
+	defer health.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -231,6 +237,7 @@ func (d *Device) ensureStarted(ctx context.Context) error {
 		}
 		if ready {
 			if age := d.now().Sub(observed); age < 0 || age > time.Second {
+				d.Fail(ErrTiming)
 				return ErrTiming
 			}
 			return nil
@@ -243,6 +250,7 @@ func (d *Device) ensureStarted(ctx context.Context) error {
 		case <-timer.C:
 			return ErrTiming
 		case <-d.changed:
+		case <-health.C:
 		}
 	}
 }
@@ -297,6 +305,12 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 	}
 	d.hasReservation = false
 	d.mu.Unlock()
+	var health *time.Ticker
+	defer func() {
+		if health != nil {
+			health.Stop()
+		}
+	}()
 	for len(samples) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -326,12 +340,27 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 		d.mu.Unlock()
 		samples = samples[n:]
 		if len(samples) > 0 && full {
+			if health == nil {
+				health = time.NewTicker(100 * time.Millisecond)
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-d.closed:
 				return ErrClosed
 			case <-d.changed:
+			case <-health.C:
+				if err := d.driver.Check(); err != nil {
+					d.Fail(err)
+					return err
+				}
+				d.mu.Lock()
+				observed := d.observed
+				d.mu.Unlock()
+				if age := d.now().Sub(observed); age < 0 || age > time.Second {
+					d.Fail(ErrTiming)
+					return ErrTiming
+				}
 			}
 		}
 	}

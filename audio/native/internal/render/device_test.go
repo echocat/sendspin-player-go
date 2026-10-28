@@ -5,11 +5,13 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/slf4g/level"
 	"github.com/echocat/slf4g/testing/recording"
 )
 
@@ -17,6 +19,7 @@ type fakeDriver struct {
 	d                         *Device
 	start, stop, close, check error
 	starts, stops, closes     int
+	checks, failAfter         int
 	silent                    bool
 	clock                     int64
 }
@@ -34,7 +37,13 @@ func (f *fakeDriver) Start() error {
 }
 func (f *fakeDriver) Stop() error  { f.stops++; return f.stop }
 func (f *fakeDriver) Close() error { f.closes++; return f.close }
-func (f *fakeDriver) Check() error { return f.check }
+func (f *fakeDriver) Check() error {
+	f.checks++
+	if f.failAfter > 0 && f.checks >= f.failAfter {
+		return ErrDriver
+	}
+	return f.check
+}
 func openFake(t *testing.T, f *fakeDriver) *Device {
 	t.Helper()
 	f.clock = int64(time.Second)
@@ -288,6 +297,83 @@ func TestValidationAndCanceledCallsDoNotStartNativeIO(t *testing.T) {
 	for _, format := range []audio.Format{{}, {SampleRate: 48000, Channels: 9}, {SampleRate: 9999999, Channels: 2}} {
 		if _, err := Open(context.Background(), Config{}, format, nil); err == nil {
 			t.Fatal("invalid format accepted")
+		}
+	}
+}
+
+func TestBlockedWriteChecksNativeHealthWithoutCallbacks(t *testing.T) {
+	f := &fakeDriver{failAfter: 3}
+	d := openFake(t, f)
+	if _, err := d.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := d.Write(ctx, make([]float32, len(d.ring)+96)); !errors.Is(err, ErrDriver) {
+		t.Fatal("health failure did not unblock writer", err)
+	}
+}
+
+func TestStaleCallbackClockInvalidatesQueuedMedia(t *testing.T) {
+	f := &fakeDriver{}
+	d := openFake(t, f)
+	base := time.Now()
+	d.now = func() time.Time { return base }
+	if _, err := d.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	d.now = func() time.Time { return base.Add(2 * time.Second) }
+	if err := d.Write(context.Background(), []float32{.5, -.5}); !errors.Is(err, ErrTiming) {
+		t.Fatal(err)
+	}
+	out := make([]float32, 96)
+	d.Process(out, f.clock+int64(time.Millisecond))
+	if !slices.Equal(out, make([]float32, 96)) {
+		t.Fatal("stale media escaped")
+	}
+	d.now = time.Now
+}
+
+func TestFactoryFailureAndPostOpenCancellationReleaseDriver(t *testing.T) {
+	format := audio.Format{SampleRate: 48000, Channels: 2}
+	fault := errors.New("open failure")
+	f := &fakeDriver{}
+	if _, err := Open(context.Background(), Config{}, format, func(*Device) (Driver, error) { return f, fault }); !errors.Is(err, fault) || f.closes != 1 {
+		t.Fatal("partial driver leaked", err, f.closes)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f = &fakeDriver{}
+	if _, err := Open(ctx, Config{Logger: recording.NewLogger()}, format, func(*Device) (Driver, error) { cancel(); return f, nil }); !errors.Is(err, context.Canceled) || f.closes != 1 || f.starts != 0 {
+		t.Fatal("post-open cancellation leaked/started driver", err)
+	}
+}
+
+func TestLifecycleLoggerRedactsDeviceAndRawNativeFailure(t *testing.T) {
+	l := recording.NewLogger()
+	l.SetLevel(level.Debug)
+	f := &fakeDriver{close: errors.New("SECRET native failure")}
+	d, err := Open(context.Background(), Config{Backend: "fake", Device: "SECRET endpoint", Logger: l}, audio.Format{SampleRate: 48000, Channels: 2}, func(*Device) (Driver, error) { return f, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.Close(); err == nil {
+		t.Fatal("native close failure lost")
+	}
+	if l.Len() != 2 {
+		t.Fatal("lifecycle log count", l.Len())
+	}
+	for _, event := range l.GetAll() {
+		if err := event.ForEach(func(key string, value any) error {
+			if s, ok := value.(string); ok && strings.Contains(s, "SECRET") {
+				t.Fatal("private native data logged", key)
+			}
+			if key == "error" {
+				t.Fatal("raw error logged")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

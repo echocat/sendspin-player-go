@@ -119,6 +119,10 @@ joins callbacks before deleting their cgo handle and is idempotent, including
 its error result. Native API calls and arbitrary logging sinks may still block;
 Go context cancellation cannot forcibly preempt C or safely destroy an active
 native callback. Driver/server/FIFO latency reports remain external dependencies.
+If a broken CoreAudio unit refuses native disposal, Go callbacks are detached
+and joined before deleting the token; the failed C trampoline is deliberately
+retained rather than freed under an active native callback. Close reports the
+failure instead of promising leak-free forced teardown of a broken native API.
 
 ## Validation boundaries
 
@@ -136,6 +140,16 @@ faults with fake drivers. It **does not open an audio device or connect to an
 audio server**. Platform evidence has a separate `desktop-audio` audit profile;
 it cannot fulfill hardware requirements or inherit another platform's success.
 PortAudio CI remains unchanged.
+
+`mise run test:pipewire:isolated` additionally starts a **private** PipeWire server
+with only a timer-driven null sink, private configuration and short private Unix
+sockets, no session manager and no hardware/network/capture modules. It runs
+three real native open/write-silence/flush/restart/close cycles and tests server
+loss while a writer is blocked. This is real PipeWire API/lifecycle evidence,
+**not** a device-clock test. Configurations/logs stay in
+`var/platform-validation/native-desktop/pipewire`; only the fixture's own short
+runtime socket directory is removed after teardown. Ordinary native audits
+explicitly disable this opt-in, keeping their no-server scope distinct.
 
 There is no physical +/-1ms synchronization, audibility, rate-window or downstream
 silence certificate. Actual Windows/macOS outputs, real PipeWire hardware routing,

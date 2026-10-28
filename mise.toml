@@ -152,6 +152,15 @@ dir = "audio/native"
 env.CGO_ENABLED = "0"
 run = "go test -count=1 ./..."
 
+[tasks."test:pipewire:isolated"]
+description = "Native PipeWire lifecycle through a private timer-driven null sink, never the host audio server"
+dir = "audio/native"
+env.CGO_ENABLED = "1"
+env.CGO_CFLAGS_ALLOW = "-fno-strict-overflow"
+env.SENDSPIN_PIPEWIRE_ISOLATED = "1"
+env.SENDSPIN_PIPEWIRE_ARTIFACT_DIR = "{{config_root}}/var/platform-validation/native-desktop/pipewire"
+run = "go test -race -count=1 -v -run '^TestIsolatedPipeWirePlaybackLifecycle$' ./pipewire"
+
 [tasks."lint:backends:alsa"]
 description = "Check ALSA formatting/dependencies and unavailable-platform stub without native headers"
 dir = "audio/alsa"

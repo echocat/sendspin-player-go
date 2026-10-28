@@ -21,11 +21,11 @@ static pthread_once_t initialize = PTHREAD_ONCE_INIT;
 static void init_library(void) { pw_init(NULL, NULL); }
 
 static void state_changed(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error) {
-    (void)old; (void)error;
+    (void)error;
     sendspin_pw *p = data;
     p->state = state;
     pw_thread_loop_signal(p->loop, false);
-    if (state == PW_STREAM_STATE_ERROR) sendspinNativeFail(p->token);
+    if (state == PW_STREAM_STATE_ERROR || (state == PW_STREAM_STATE_UNCONNECTED && old != PW_STREAM_STATE_UNCONNECTED)) sendspinNativeFail(p->token);
 }
 
 static void process(void *data) {
@@ -57,7 +57,7 @@ static void process(void *data) {
     sendspinNativeRender(p->token, d->data, (int)frames * p->channels, first);
     d->chunk->offset = 0; d->chunk->stride = stride; d->chunk->size = frames * stride;
     buffer->size = frames; /* pw_time.queued is consequently in stream frames. */
-    pw_stream_queue_buffer(p->stream, buffer);
+    if (pw_stream_queue_buffer(p->stream, buffer) < 0) sendspinNativeFail(p->token);
 }
 
 static const struct pw_stream_events events = {

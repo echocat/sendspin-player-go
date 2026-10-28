@@ -10,11 +10,15 @@
 #include <string.h>
 #include <limits.h>
 #include <math.h>
+#include <stdatomic.h>
+#include <time.h>
 
 struct sendspin_ca {
     AudioUnit unit;
     AudioDeviceID device;
     uintptr_t token;
+    atomic_uint callbacks;
+    atomic_int closing;
     int channels, rate, initialized, started;
     UInt32 latency;
     Float64 nominal_rate;
@@ -38,7 +42,14 @@ static OSStatus process(void *data, AudioUnitRenderActionFlags *flags, const Aud
     UInt32 bus, UInt32 frames, AudioBufferList *buffers) {
     (void)flags; (void)bus;
     sendspin_ca *p = data;
-    if (!buffers) { sendspinNativeFail(p->token); return kAudio_ParamError; }
+    atomic_fetch_add(&p->callbacks, 1);
+    if (atomic_load(&p->closing)) {
+        if (buffers) for (UInt32 i = 0; i < buffers->mNumberBuffers && i < 8; i++) {
+            if (buffers->mBuffers[i].mData) memset(buffers->mBuffers[i].mData, 0, buffers->mBuffers[i].mDataByteSize);
+        }
+        atomic_fetch_sub(&p->callbacks, 1); return noErr;
+    }
+    if (!buffers) { sendspinNativeFail(p->token); atomic_fetch_sub(&p->callbacks, 1); return kAudio_ParamError; }
     /* The configured client format is one interleaved native-endian float buffer. */
     if (buffers->mNumberBuffers != 1 || frames == 0 || frames > (UInt32)p->rate / 2 ||
         !buffers->mBuffers[0].mData || buffers->mBuffers[0].mNumberChannels != (UInt32)p->channels ||
@@ -46,7 +57,7 @@ static OSStatus process(void *data, AudioUnitRenderActionFlags *flags, const Aud
         for (UInt32 i = 0; i < buffers->mNumberBuffers && i < 8; i++) {
             if (buffers->mBuffers[i].mData) memset(buffers->mBuffers[i].mData, 0, buffers->mBuffers[i].mDataByteSize);
         }
-        sendspinNativeFail(p->token); return kAudioUnitErr_FormatNotSupported;
+        sendspinNativeFail(p->token); atomic_fetch_sub(&p->callbacks, 1); return kAudioUnitErr_FormatNotSupported;
     }
     int64_t first = 0;
     if (stamp && (stamp->mFlags & kAudioTimeStampHostTimeValid)) {
@@ -54,6 +65,7 @@ static OSStatus process(void *data, AudioUnitRenderActionFlags *flags, const Aud
         first = sendspin_native_ca_time(ns, p->latency, p->nominal_rate);
     }
     sendspinNativeRender(p->token, buffers->mBuffers[0].mData, (int)frames * p->channels, first);
+    atomic_fetch_sub(&p->callbacks, 1);
     return noErr;
 }
 
@@ -67,16 +79,24 @@ int32_t sendspin_ca_stop(sendspin_ca *p) {
 int32_t sendspin_ca_close(sendspin_ca *p) {
     if (!p) return 0;
     OSStatus rc = noErr;
+    OSStatus disposed = noErr;
+    atomic_store(&p->closing, 1);
     if (p->unit) {
         if (p->started) rc = AudioOutputUnitStop(p->unit);
         if (p->initialized) { OSStatus r = AudioUnitUninitialize(p->unit); if (!rc) rc = r; }
-        OSStatus r = AudioComponentInstanceDispose(p->unit); if (!rc) rc = r;
+        disposed = AudioComponentInstanceDispose(p->unit); if (!rc) rc = disposed;
     }
-    free(p); return rc;
+    /* Detach/join Go callbacks even if a broken native unit refuses disposal.
+       In that failure case the tiny C trampoline remains alive and emits only
+       zeros: leaking a failed native allocation is safer than a dangling token. */
+    while (atomic_load(&p->callbacks)) { struct timespec delay = {0, 1000000}; nanosleep(&delay, NULL); }
+    if (!disposed) free(p);
+    return rc;
 }
 sendspin_ca *sendspin_ca_open(uintptr_t token, const char *uid, int rate, int channels, int32_t *error) {
-    sendspin_ca *p = calloc(1, sizeof(*p)); *error = memFullErr;
+    sendspin_ca *p = calloc(1, sizeof(*p)); *error = kAudioUnitErr_FailedInitialization;
     if (!p) return NULL;
+    atomic_init(&p->callbacks, 0); atomic_init(&p->closing, 0);
     p->token = token; p->rate = rate; p->channels = channels;
 #define CHECK(call) do { *error = (call); if (*error) goto fail; } while (0)
     if (uid && *uid) {

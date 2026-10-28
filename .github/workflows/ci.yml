@@ -188,9 +188,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev pipewire-bin libpipewire-0.3-modules libspa-0.2-modules
       - run: mise run lint:desktop-audio
       - run: mise run test:desktop-audio
+      - if: runner.os == 'Linux'
+        run: mise run test:pipewire:isolated
       - run: go run ./internal/specauditcmd report --profile desktop-audio --output var/audit/desktop-audio
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -199,6 +201,12 @@ jobs:
           path: |
             var/audit/evidence
             var/audit/desktop-audio
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: native-desktop-private-pipewire-attempt-${{ github.run_attempt }}
+          path: var/platform-validation/native-desktop/pipewire
           if-no-files-found: warn
   spec-report:
     name: RC1 traceability (not certification)
