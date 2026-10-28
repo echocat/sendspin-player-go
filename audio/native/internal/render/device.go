@@ -302,8 +302,10 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 	epoch := d.epoch
 	if d.hasReservation {
 		epoch = d.reserved
+	} else {
+		d.reserved = epoch
+		d.hasReservation = true
 	}
-	d.hasReservation = false
 	d.mu.Unlock()
 	var health *time.Ticker
 	defer func() {

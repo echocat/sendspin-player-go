@@ -124,7 +124,9 @@ context.objects = [
 		d, openErr := (Output{Device: "sendspin-null", Logger: recording.NewLogger()}).Open(ctx, audio.Format{SampleRate: 48000, Channels: 2})
 		if openErr != nil {
 			stopLink()
-			_ = <-linked
+			if cleanupErr := <-linked; cleanupErr != nil {
+				t.Log("link cleanup:", cleanupErr)
+			}
 			t.Fatal(openErr, "fixture artifacts:", root)
 		}
 		linkRead := false
@@ -182,12 +184,16 @@ context.objects = [
 	d, err := (Output{Device: "sendspin-null", Logger: recording.NewLogger()}).Open(ctx, audio.Format{SampleRate: 48000, Channels: 2})
 	if err != nil {
 		stopLink()
-		_ = <-linked
+		if cleanupErr := <-linked; cleanupErr != nil {
+			t.Log("link cleanup:", cleanupErr)
+		}
 		t.Fatal(err)
 	}
 	if _, err = d.Next(ctx); err != nil {
 		stopLink()
-		_ = <-linked
+		if cleanupErr := <-linked; cleanupErr != nil {
+			t.Log("link cleanup:", cleanupErr)
+		}
 		_ = d.Close()
 		t.Fatal(err)
 	}
@@ -208,7 +214,9 @@ context.objects = [
 	time.Sleep(20 * time.Millisecond)
 	if err = daemon.Process.Kill(); err != nil {
 		_ = d.Close()
-		_ = <-written
+		if cleanupErr := <-written; cleanupErr != nil {
+			t.Log("writer cleanup:", cleanupErr)
+		}
 		t.Fatal(err)
 	}
 	_ = daemon.Wait()
@@ -220,7 +228,9 @@ context.objects = [
 		}
 	case <-time.After(2 * time.Second):
 		_ = d.Close()
-		_ = <-written
+		if cleanupErr := <-written; cleanupErr != nil {
+			t.Log("writer cleanup:", cleanupErr)
+		}
 		t.Fatal("server loss did not wake blocked writer")
 	}
 	_ = d.Close() // Native stop may report the already-disconnected server.

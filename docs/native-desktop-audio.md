@@ -110,6 +110,10 @@ stale or invalid clocks return `ErrTiming`; native failures return an error or
 underrun has overtaken a `Next` reservation, `Write` returns `ErrClockReset`
 instead of silently moving the scheduled samples. The shared SDK renderer owns
 ordinary drift corrections and resynchronization decisions.
+The reservation covers consecutive writes (including alignment silence followed
+by media) until another `Next` or `Flush`; an idle gap must not silently rebase
+the second half of a scheduled submission. Blocked writers also poll native
+health and stale-callback state, without using those timers as an audio clock.
 
 `Flush` disables media callbacks, drops the SDK ring, stops/resets the native
 stream, then conservatively waits through the last reported submitted tail. It

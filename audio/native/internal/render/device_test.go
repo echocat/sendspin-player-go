@@ -102,6 +102,29 @@ func TestReservedTimelineCannotMoveSilently(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestConsecutiveWritesKeepTheReservationUntilNextOrFlush(t *testing.T) {
+	f := &fakeDriver{}
+	d := openFake(t, f)
+	if _, err := d.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The SDK may write alignment silence and then media without another Next.
+	if err := d.Write(context.Background(), make([]float32, 96)); err != nil {
+		t.Fatal(err)
+	}
+	d.Process(make([]float32, 96), f.clock+int64(2*time.Millisecond))
+	d.Process(make([]float32, 96), f.clock+int64(3*time.Millisecond))
+	if err := d.Write(context.Background(), []float32{.5, -.5}); !errors.Is(err, ErrClockReset) {
+		t.Fatal("media silently moved after alignment silence underrun", err)
+	}
+	if _, err := d.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(context.Background(), []float32{.5, -.5}); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestTimingFaultsNeverReleaseMedia(t *testing.T) {
 	for _, name := range []string{"zero", "too-far", "too-old", "no-clock", "slow", "backwards", "invalid-frame"} {
 		t.Run(name, func(t *testing.T) {

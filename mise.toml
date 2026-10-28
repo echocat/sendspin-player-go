@@ -75,7 +75,7 @@ run = "go mod tidy"
 
 [tasks."format:check"]
 description = "Check golangci-lint formatting without changing files"
-depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:backends:alsa", "lint:examples:player:format", "lint:examples:audio-probe"]
+depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:backends:alsa", "lint:backends:desktop", "lint:examples:player:format", "lint:examples:audio-probe"]
 
 [tasks."format:examples:audio-probe"]
 description = "Format and tidy the standalone output validation example"
