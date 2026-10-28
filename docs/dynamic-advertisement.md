@@ -1,4 +1,4 @@
-# Dynamic mDNS publication (development after v0.1.0)
+# Dynamic mDNS publication (SDK v0.1.1)
 
 This change does not move the published v0.1.0 tags or expand PortAudio CI.
 The public constructors remain usable with their existing keyed fields.

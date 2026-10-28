@@ -1,6 +1,6 @@
 # Releasing
 
-SDK **v0.1.0** is the initial API release; the API may change before v1.
+SDK **v0.1.1** follows the initial API release; the API may change before v1.
 Do not describe it as fully RC1-conformant; consult `conformance.md`.
 
 Before a release:
@@ -28,9 +28,9 @@ full RC1 or physical synchronization conformance. The human clause table is
 generated from `rc1-requirements.json`; do not hand-edit it to remove open gaps.
 
 The independent PortAudio module uses the unchanged import path ending in
-`/audio/portaudio`. Its v0.1.0 release requires root SDK v0.1.0 rather than an
+`/audio/portaudio`. Its v0.1.1 release requires root SDK v0.1.1 rather than an
 orphaned historical pseudo-version; its local development `replace` is ignored
 by consumers. Test a separate consumer without local replacements. Its Go version tags
-use the submodule prefix, e.g. `audio/portaudio/v0.1.0`; root tags do not publish it.
+use the submodule prefix, e.g. `audio/portaudio/v0.1.1`; root tags do not publish it.
 The example has local `replace` directives for both modules and is not separately
 published. No release automation pushes tags or publishes artifacts.

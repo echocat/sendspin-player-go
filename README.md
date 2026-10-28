@@ -5,7 +5,7 @@ A Go SDK for Sendspin players, targeting specification **1.0.0-rc1** at
 Requires **Go 1.27.3+**. The SDK core, including PCM, FLAC and Opus decoding, is
 pure Go. Native audio output is optional.
 
-**Status:** SDK **v0.1.0**, initial API release; the API may change before v1.
+**Status:** SDK **v0.1.1**; the API may change before v1. See [release notes](CHANGELOG.md).
 This is not a declaration of complete RC1 conformance.
 Independent server interoperability is tested; physical synchronization has not
 been measured. See [coverage and remaining work](docs/conformance.md).
@@ -22,7 +22,7 @@ Tests can use `slf4g/sdk/testlog` or `slf4g/testing/recording` without installin
 process-global provider.
 
 - Client- and server-initiated WebSockets, with mutually exclusive discovery modes.
-- Development after v0.1.0: [dynamic mDNS publication](docs/dynamic-advertisement.md) preserves live listener restrictions.
+- [Dynamic mDNS publication](docs/dynamic-advertisement.md) preserves live listener restrictions.
 - Noise `KKpsk2`, both RC1 cipher suites, PSK pairing, re-handshakes and unpairing.
 - Persistent identity, pairing records, output delay, volume and mute.
 - Player, controller, metadata, artwork, visualizer and color roles; individually enabled.
@@ -34,7 +34,7 @@ process-global provider.
 ## Embed
 
 ```sh
-go get github.com/echocat/sendspin-player-go@v0.1.0
+go get github.com/echocat/sendspin-player-go@v0.1.1
 ```
 
 ```go
