@@ -1,0 +1,194 @@
+name: Continuous Integration
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ['1.27.3', 'stable']
+    runs-on: ${{ matrix.os }}
+    env:
+      SENDSPIN_EVIDENCE_VARIANT: ${{ matrix.go == 'stable' && 'stable' || 'default' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Prepare coverage output
+        run: |
+          mkdir -p var/coverage
+          printf '%s\n' 'module github.com/echocat/sendspin-player-go/var' > var/go.mod
+        shell: bash
+      - run: go run ./internal/specauditcmd run --suite unit --coverage
+      - run: go mod tidy -diff
+      - name: Record CGO-free example tests
+        run: go run ./internal/specauditcmd run --suite examples
+      - name: Build the Oto-only example without CGO
+        working-directory: _examples/player
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go build -o ../../var/bin/oto/ .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-go-${{ matrix.os }}-${{ matrix.go }}-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: mise run test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-e2e-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: resource-soak-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: var/soak
+          if-no-files-found: warn
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: mise run vuln
+      - run: mise run test:fuzz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-fuzz-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+  lint:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: mise run lint
+  mdns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: mise run test:mdns:docker
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-mdns-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: mise run test:conformance
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-harness-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/evidence
+            var/conformance
+          if-no-files-found: warn
+  time-filter-reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SENDSPIN_REFERENCE_UBSAN: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.3'
+      - run: go run ./internal/specauditcmd run --suite reference
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-reference-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+  native-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+      - run: mise run lint:native
+      - run: mise run test:native
+      - run: mise run build:example
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-native-attempt-${{ github.run_attempt }}
+          path: var/audit/evidence
+          if-no-files-found: warn
+  spec-report:
+    name: RC1 traceability (not certification)
+    if: always()
+    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: spec-evidence-*-attempt-${{ github.run_attempt }}
+          path: var/audit/ci
+      - name: Validate catalog and pinned upstream source fingerprints
+        if: always()
+        run: |
+          mise run lint:audit
+          mise run audit:verify-spec
+          mise run audit:verify-noise
+      - name: Generate and gate the pinned Linux software-evidence report
+        if: always()
+        run: go run ./internal/specauditcmd report --profile full --evidence var/audit/ci --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Generate and gate native build/callback evidence (not physical measurements)
+        if: always()
+        run: go run ./internal/specauditcmd report --profile native --evidence var/audit/ci --output var/audit/native --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Publish traceability summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f var/audit/summary.md ]; then
+            cat var/audit/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: rc1-traceability-report-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/report.json
+            var/audit/report.md
+            var/audit/summary.md
+            var/audit/native
+          if-no-files-found: warn

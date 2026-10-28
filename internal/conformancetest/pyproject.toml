@@ -1,0 +1,11 @@
+[project]
+name = "sendspin-player-go-conformance"
+version = "0.0.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "aiosendspin[server]==10.2.1",
+  "sendspin-conformance @ git+https://github.com/Sendspin/conformance.git@fa6dc45795f0810c5810af9f9b828595b7267ece",
+]
+
+[tool.uv]
+package = false

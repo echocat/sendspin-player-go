@@ -1,0 +1,61 @@
+version: "2"
+
+# Same formatter and focused extra linters as echocat/cli4g; keep the default
+# correctness linters enabled as well. SDK-specific exceptions need a reason.
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - .idea
+      - var
+
+linters:
+  exclusions:
+    paths:
+      - .idea
+      - .github
+      - var
+    rules:
+      # RC1 spells this wire reason with a double l; never rewrite it.
+      - linters: [misspell]
+        text: '\bcancelled\b'
+        source: 'user_cancelled'
+      # Join error channels during cleanup without replacing the primary
+      # failure/cancellation. Bare receives are idiomatic (staticcheck S1005).
+      - linters: [errcheck]
+        text: '^Error return value is not checked'
+        source: '<-(done|engineDone).*// Cleanup:'
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - misspell
+    - copyloopvar
+    - exptostd
+    - importas
+  settings:
+    misspell:
+      locale: US
+      ignore-rules:
+        - sendspin
+        - gopus
+    staticcheck:
+      checks:
+        - all
+        - -ST1003
+        - -ST1006
+        - -ST1018
+        - -QF1001
+        - -QF1003
+        - -QF1008
+
+run:
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  allow-serial-runners: true
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,311 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+[settings]
+lockfile = true
+
+[tools]
+go = "1.27.3"
+uv = "0.12.13"
+actionlint = "1.7.12"
+golangci-lint = "2.15.0"
+
+[tasks.format]
+description = "Format Go sources with golangci-lint and tidy the module"
+depends = ["format:go", "format:backends", "format:examples", "format:audit"]
+
+[tasks."format:audit"]
+description = "Regenerate the human RC1 audit from the requirement catalog"
+depends = ["format:go", "format:backends", "format:examples"]
+run = "go run ./internal/specauditcmd generate"
+
+[tasks."format:go"]
+description = "Format SDK Go sources and tidy the module"
+depends = ["format:go:code", "format:go:deps"]
+
+[tasks."format:go:code"]
+description = "Format SDK Go source code"
+run = "golangci-lint fmt ./..."
+
+[tasks."format:go:deps"]
+description = "Tidy SDK Go dependencies"
+run = "go mod tidy"
+
+[tasks."format:examples"]
+description = "Format and tidy all independent example modules"
+depends = ["format:examples:player", "format:examples:audio-probe"]
+
+[tasks."format:backends"]
+description = "Format independent audio backend modules"
+depends = ["format:backends:portaudio"]
+
+[tasks."format:backends:portaudio"]
+description = "Format and tidy the independent PortAudio module"
+depends = ["format:backends:portaudio:code", "format:backends:portaudio:deps"]
+
+[tasks."format:backends:portaudio:code"]
+dir = "audio/portaudio"
+run = 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...'
+
+[tasks."format:backends:portaudio:deps"]
+dir = "audio/portaudio"
+run = "go mod tidy"
+
+[tasks."format:examples:player"]
+description = "Format and tidy the independent native player module"
+depends = ["format:examples:player:code", "format:examples:player:deps"]
+
+[tasks."format:examples:player:code"]
+description = "Format native player Go source code"
+dir = "_examples/player"
+run = 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...'
+
+[tasks."format:examples:player:deps"]
+description = "Tidy native player Go dependencies"
+dir = "_examples/player"
+run = "go mod tidy"
+
+[tasks."format:check"]
+description = "Check golangci-lint formatting without changing files"
+depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:examples:player:format", "lint:examples:audio-probe"]
+
+[tasks."format:examples:audio-probe"]
+description = "Format and tidy the standalone output validation example"
+dir = "_examples/audio-probe"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
+
+[tasks."lint:examples:audio-probe"]
+description = "Check standalone output validation formatting and dependencies"
+dir = "_examples/audio-probe"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...']
+
+[tasks."lint:native:examples:audio-probe"]
+dir = "_examples/audio-probe"
+env.CGO_ENABLED = "1"
+run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+
+[tasks.lint]
+description = "Lint Go sources, formatting, module files and CI workflows"
+depends = ["lint:go", "lint:actions", "lint:backends", "lint:examples", "lint:audit"]
+
+[tasks."lint:audit"]
+description = "Validate pinned requirements, real test declarations and generated audit"
+run = "go run ./internal/specauditcmd check"
+
+[tasks."lint:go"]
+description = "Lint SDK Go sources, formatting and module files (includes govet)"
+depends = ["lint:go:format", "lint:go:mod", "lint:go:tagged"]
+run = "golangci-lint run"
+
+[tasks."lint:go:format"]
+description = "Check SDK Go formatting"
+run = "golangci-lint fmt --diff ./..."
+
+[tasks."lint:go:mod"]
+description = "Check SDK Go module files"
+run = "go mod tidy -diff"
+
+[tasks."lint:go:tagged"]
+description = "Lint E2E, multicast and live-reference Go sources"
+run = 'golangci-lint run --build-tags="e2e,mdns_e2e,timefilter_reference"'
+
+[tasks."lint:actions"]
+description = "Lint GitHub Actions workflows"
+run = "actionlint -shellcheck="
+
+[tasks."lint:examples"]
+description = "Check all independent examples without requiring native headers"
+depends = ["lint:examples:player", "lint:examples:audio-probe"]
+
+[tasks."lint:backends"]
+description = "Check independent backend formatting and module files"
+depends = ["lint:backends:portaudio"]
+
+[tasks."lint:backends:portaudio"]
+depends = ["lint:backends:portaudio:format", "lint:backends:portaudio:mod"]
+
+[tasks."lint:backends:portaudio:format"]
+dir = "audio/portaudio"
+run = 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...'
+
+[tasks."lint:backends:portaudio:mod"]
+dir = "audio/portaudio"
+run = "go mod tidy -diff"
+
+[tasks."lint:examples:player"]
+description = "Check native player formatting and module files"
+depends = ["lint:examples:player:format", "lint:examples:player:mod"]
+
+[tasks."lint:examples:player:format"]
+description = "Check native player Go formatting"
+dir = "_examples/player"
+run = 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...'
+
+[tasks."lint:examples:player:mod"]
+description = "Check native player Go module files"
+dir = "_examples/player"
+run = "go mod tidy -diff"
+
+[tasks."lint:native"]
+description = "Lint the native backend and player (PortAudio development files required)"
+depends = ["lint:native:backends", "lint:native:examples"]
+
+[tasks."lint:native:backends"]
+depends = ["lint:native:backends:portaudio"]
+
+[tasks."lint:native:backends:portaudio"]
+description = "Lint the PortAudio module with CGO"
+dir = "audio/portaudio"
+env.CGO_ENABLED = "1"
+run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+
+[tasks."lint:native:examples"]
+description = "Lint all examples with native backends"
+depends = ["lint:native:examples:player", "lint:native:examples:audio-probe"]
+
+[tasks."lint:native:examples:player"]
+description = "Lint the independent PortAudio player"
+dir = "_examples/player"
+env.CGO_ENABLED = "1"
+run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+
+[tasks."test:module"]
+description = "Test the SDK extracted from a distributable module archive"
+run = "go test -count=1 ./internal/integration -run TestModuleArchive"
+
+[tasks.test]
+description = "Run unit and integration tests with the race detector"
+run = "go run ./internal/specauditcmd run --suite unit"
+
+[tasks."test:coverage"]
+depends = ["prepare"]
+run = "go run ./internal/specauditcmd run --suite unit --coverage"
+
+[tasks."test:native"]
+description = "Test native backend and example without opening hardware"
+depends = ["test:native:backends", "test:native:examples"]
+
+[tasks."test:native:backends"]
+depends = ["test:native:backends:portaudio"]
+
+[tasks."test:native:backends:portaudio"]
+run = "go run ./internal/specauditcmd run --suite portaudio"
+
+[tasks."test:native:examples"]
+depends = ["test:native:examples:player"]
+
+[tasks."test:native:examples:player"]
+run = "go run ./internal/specauditcmd run --suite native-example"
+
+[tasks."test:examples"]
+description = "Test example selection without CGO or audio hardware"
+depends = ["test:examples:player"]
+
+[tasks."test:examples:player"]
+run = "go run ./internal/specauditcmd run --suite examples"
+
+[tasks."build:example"]
+description = "Build both Oto-only and native player variants"
+depends = ["build:example:oto", "build:example:portaudio"]
+
+[tasks."build:example:oto"]
+depends = ["prepare"]
+description = "Build the Oto-only player without CGO"
+dir = "_examples/player"
+env.CGO_ENABLED = "0"
+run = 'go build -o "{{config_root}}/var/bin/oto/" .'
+
+[tasks."build:example:portaudio"]
+depends = ["prepare"]
+description = "Build the native player with CGO and PortAudio"
+dir = "_examples/player"
+env.CGO_ENABLED = "1"
+run = 'go build -o "{{config_root}}/var/bin/portaudio/" .'
+
+[tasks."validate:audio:oto"]
+description = "Explicit native silence-only Oto lifecycle smoke (not physical sync evidence)"
+depends = ["prepare"]
+dir = "_examples/audio-probe"
+env.CGO_ENABLED = "0"
+run = 'go run . -backend oto -run-silence -output "{{config_root}}/var/platform-validation/oto.json"'
+
+[tasks."validate:audio:portaudio"]
+description = "Explicit native silence-only PortAudio lifecycle smoke (requires an output device)"
+depends = ["prepare"]
+dir = "_examples/audio-probe"
+env.CGO_ENABLED = "1"
+run = 'go run . -backend portaudio -run-silence -output "{{config_root}}/var/platform-validation/portaudio.json"'
+
+[tasks."validate:audio:portaudio:wslg"]
+description = "Silence-only PortAudio via private WSLg Pulse/ALSA routing; no global audio changes"
+depends = ["prepare"]
+run = 'bash "{{config_root}}/mise-tasks/validate-audio-wslg.sh"'
+
+[tasks."test:timefilter"]
+description = "Run the C++-generated time-filter vectors without a C++ compiler"
+run = "go test -race -count=1 ./internal/timesync"
+
+[tasks."test:timefilter:reference"]
+description = "Compare live with the pinned C++17 reference (GCC/Clang required)"
+run = "go run ./internal/specauditcmd run --suite reference"
+
+[tasks."test:timefilter:update"]
+description = "Regenerate frozen vectors from C++, never from Go predictions"
+run = "go test -count=1 -tags=timefilter_reference -run=^TestCPPReference$ -timeout=2m ./internal/timesync -args -update-timefilter-reference"
+
+[tasks."test:e2e"]
+description = "Run the pinned independent RC1 reference server (no sound card)"
+run = "go run ./internal/specauditcmd run --suite e2e"
+
+[tasks."test:network"]
+description = "Repeat isolated userspace transport/load scenarios without hardware or host network changes"
+depends = ["prepare"]
+run = 'bash "{{config_root}}/mise-tasks/test-network.sh"'
+
+[tasks."test:soak"]
+description = "Sustained virtual-output resource soak; three minutes per cipher suite by default"
+depends = ["prepare"]
+run = 'bash "{{config_root}}/mise-tasks/test-soak.sh"'
+
+[tasks."test:mdns"]
+description = "Real dual-stack multicast and interface hotplug in isolated Linux networks"
+run = "go run ./internal/specauditcmd run --suite mdns"
+
+[tasks."test:mdns:docker"]
+description = "Run the isolated multicast fixture with Docker explicitly"
+run = "go run ./internal/specauditcmd run --suite mdns-docker"
+
+[tasks."test:conformance"]
+description = "Run the pinned official harness locally under a distinct SDK entry"
+run = "go run ./internal/specauditcmd run --suite harness"
+
+[tasks."test:fuzz"]
+description = "Record every discovered fuzz campaign, not only ordinary seed runs"
+run = "go run ./internal/specauditcmd run --suite fuzz"
+
+[tasks."audit:report"]
+description = "Generate the RC1 traceability report without assuming unrun suites passed"
+run = "go run ./internal/specauditcmd report"
+
+[tasks."audit:verify-spec"]
+description = "Explicitly verify frozen source/paragraph hashes against the pinned upstream revision"
+run = "go run ./internal/specauditcmd verify-spec"
+
+[tasks."audit:verify-noise"]
+description = "Verify fixed independent Cacophony Noise vectors against their pinned source"
+run = "go run ./internal/noisevectorcmd"
+
+[tasks."audit:check-conformance"]
+description = "Strict gate; currently expected to fail while normative/hardware review is open"
+run = "go run ./internal/specauditcmd report --profile full --require-conformance"
+
+[tasks."audit:check-evidence"]
+description = "Require fresh complete core evidence, without claiming complete conformance"
+depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise"]
+run = "go run ./internal/specauditcmd report --profile full"
+
+[tasks.vuln]
+description = "Check reachable dependencies against the Go vulnerability database"
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
+
+[tasks."check:full"]
+description = "Run the complete implemented quality gate"
+depends = ["audit:check-evidence", "vuln"]
