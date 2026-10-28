@@ -3,8 +3,6 @@ package discovery
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -12,28 +10,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/libp2p/zeroconf/v2"
+	zeroconf "github.com/echocat/sendspin-player-go/internal/mdns"
+	log "github.com/echocat/slf4g"
 )
 
 type Endpoint struct{ Name, URL string }
-type Advertisement struct {
-	servers []*zeroconf.Server
-	once    sync.Once
-}
-
-func (a *Advertisement) Close() {
-	if a != nil {
-		a.once.Do(func() {
-			for _, server := range a.servers {
-				server.Shutdown()
-			}
-		})
-	}
-}
 
 // ClientService announces one client. Instance should be a stable, unique DNS-SD
 // label (the SDK uses ClientID), independently of the optional friendly Name.
@@ -44,6 +28,12 @@ type ClientService struct {
 	Path           string
 	Interfaces     []net.Interface
 	Addresses      []net.IP
+	// IPVersion restricts published addresses: 0 means both, 4 IPv4, 6 IPv6.
+	// The restriction also applies to interfaces/addresses appearing later.
+	IPVersion int
+	// Logger optionally selects an application-owned slf4g logger for refresh
+	// health. Nil uses the discovery package facade. Sinks must return promptly.
+	Logger log.Logger
 }
 
 // Advertise announces a listening client, never a Sendspin server.
@@ -51,51 +41,26 @@ func Advertise(name string, port int, path string, interfaces []net.Interface) (
 	return AdvertiseClient(ClientService{Instance: name, Name: name, Port: port, Path: path, Interfaces: interfaces})
 }
 
-// AdvertiseClient publishes only reachable interface-specific addresses. Close
-// is synchronous, safe for concurrent calls, and unregisters only this instance.
+// AdvertiseClient publishes interface-specific addresses and refreshes them once
+// per second. Explicit Interfaces/Addresses and IPVersion remain restrictions,
+// not startup hints. Errors/Err expose later failures while refresh retries.
+// Close synchronously joins the watcher and unregisters only this instance.
 func AdvertiseClient(service ClientService) (*Advertisement, error) {
-	text, err := serviceText(service)
-	if err != nil {
-		return nil, err
-	}
-	interfaces, err := multicastInterfaces(service.Interfaces)
-	if err != nil {
-		return nil, err
-	}
-	advertisement := &Advertisement{}
-	for _, iface := range interfaces {
-		ips, err := InterfaceIPs(iface)
+	service = copyService(service)
+	snapshot := func() (map[string]advertisedBinding, error) {
+		interfaces, err := net.Interfaces()
 		if err != nil {
-			advertisement.Close()
 			return nil, err
 		}
-		var addresses []string
-		for _, ip := range ips {
-			if len(service.Addresses) == 0 || slices.ContainsFunc(service.Addresses, func(wanted net.IP) bool { return wanted.Equal(ip) }) {
-				addresses = append(addresses, ip.String())
-			}
-		}
-		if len(addresses) == 0 {
-			continue
-		}
-		id := sha256.Sum256([]byte(service.Instance + "\x00" + iface.Name))
-		host := "sendspin-" + hex.EncodeToString(id[:8]) + ".local."
-		// Numeric escapes also survive the dependency's trailing-dot trimming.
-		instance := strings.NewReplacer("\\", "\\092", ".", "\\046").Replace(service.Instance)
-		server, err := zeroconf.RegisterProxy(instance, "_sendspin._tcp", "local.", service.Port, host, addresses, text, []net.Interface{iface})
-		if err != nil {
-			advertisement.Close()
-			return nil, err
-		}
-		advertisement.servers = append(advertisement.servers, server)
+		return advertisementBindings(service, interfaces, InterfaceIPs)
 	}
-	if len(advertisement.servers) == 0 {
-		return nil, errors.New("sendspin: no multicast interface matches the advertised addresses")
-	}
-	return advertisement, nil
+	return newAdvertisement(service, snapshot, registerBinding, time.Second)
 }
 
 func serviceText(service ClientService) ([]string, error) {
+	if service.IPVersion != 0 && service.IPVersion != 4 && service.IPVersion != 6 {
+		return nil, errors.New("sendspin: invalid advertised IP version")
+	}
 	if service.Instance == "" || len(service.Instance) > 63 || !utf8.ValidString(service.Instance) || strings.ContainsAny(service.Instance, "\x00\r\n") || service.Port < 1 || service.Port > 65535 || !validPath(service.Path) || len("path="+service.Path) > 255 {
 		return nil, errors.New("sendspin: invalid mDNS advertisement")
 	}
@@ -106,26 +71,6 @@ func serviceText(service ClientService) ([]string, error) {
 		text = append(text, "name="+service.Name)
 	}
 	return text, nil
-}
-
-func multicastInterfaces(selected []net.Interface) ([]net.Interface, error) {
-	if len(selected) == 0 {
-		var err error
-		selected, err = net.Interfaces()
-		if err != nil {
-			return nil, err
-		}
-	}
-	var result []net.Interface
-	for _, iface := range selected {
-		if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagMulticast != 0 {
-			result = append(result, iface)
-		}
-	}
-	if len(result) == 0 {
-		return nil, errors.New("sendspin: no active multicast interface")
-	}
-	return result, nil
 }
 
 // InterfaceIPs returns usable unicast addresses configured on an interface.

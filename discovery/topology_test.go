@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/zeroconf/v2"
+	zeroconf "github.com/echocat/sendspin-player-go/internal/mdns"
 )
 
 func TestIPv6LinkLocalUsesReceivingScopeAndEscapesTheRequestTarget(t *testing.T) {

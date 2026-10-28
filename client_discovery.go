@@ -44,9 +44,31 @@ func (c *Client) serviceForListener(listener net.Listener) (discovery.ClientServ
 	if err != nil {
 		return service, err
 	}
+	service = listenerPublicationPolicy(address, ipv4, ipv6, service)
 	service.Instance, service.Name = c.ClientID(), c.cfg.Name
 	service.Port, service.Path = address.Port, DefaultWebSocketPath
+	service.Logger = c.logger()
 	return service, nil
+}
+
+// Keep listener restrictions, not the startup topology, across mDNS refreshes.
+// A wildcard can accept future addresses in its actual socket families. A
+// concrete IP/IPv6 zone must never broaden to an unrelated address/interface.
+func listenerPublicationPolicy(address *net.TCPAddr, ipv4, ipv6 bool, initial discovery.ClientService) discovery.ClientService {
+	if ipv4 && !ipv6 {
+		initial.IPVersion = 4
+	} else if ipv6 && !ipv4 {
+		initial.IPVersion = 6
+	}
+	if address.IP.IsUnspecified() {
+		initial.Addresses = nil
+	} else {
+		initial.Addresses = []net.IP{append(net.IP(nil), address.IP...)}
+	}
+	if address.Zone == "" {
+		initial.Interfaces = nil
+	}
+	return initial
 }
 
 func selectListenerAddresses(address *net.TCPAddr, ipv4, ipv6 bool, interfaces []net.Interface, addresses func(net.Interface) ([]net.IP, error)) (discovery.ClientService, error) {

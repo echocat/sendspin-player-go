@@ -2,6 +2,14 @@
 
 Most of this repository is licensed under the MIT license in `LICENSE`.
 
+`internal/mdns/{client,server,connection,service,utils}.go` is a generated,
+locally adapted copy of libp2p/zeroconf v2.2.0 at
+`586e7c571d106f842c8567012dacd28d73fcf966`. Copyright 2016 Stefan Smarzly and
+2014 Oleksandr Lobunets; its MIT license is retained in `internal/mdns/LICENSE`.
+Changes: verified receiving-interface filtering and required packet metadata,
+SDK package/import namespace, and redacted slf4g transport diagnostics. The
+source fingerprints and exact transformations live in `internal/mdnsimportcmd`.
+
 `internal/timesync/filter.go` is a Go adaptation of the default-parameter algorithm
 in Sendspin/time-filter, revision `531e2707a6e82f30efe335b0f87eaa4b29390021`:
 

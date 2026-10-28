@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/echocat/sendspin-player-go/discovery"
 	"github.com/echocat/sendspin-player-go/internal/protocol"
 )
 
@@ -40,6 +41,35 @@ func TestListenerAddressSelectionDoesNotPublishUnboundAddresses(t *testing.T) {
 				t.Fatal(service)
 			}
 		})
+	}
+}
+
+func TestListenerPublicationRefreshPolicyDoesNotBroadenSocketBindings(t *testing.T) {
+	iface := net.Interface{Index: 7, Name: "lan", Flags: net.FlagUp | net.FlagMulticast}
+	initial := discovery.ClientService{Interfaces: []net.Interface{iface}, Addresses: []net.IP{net.ParseIP("192.0.2.7")}}
+	for _, tc := range []struct {
+		ip, zone                string
+		v4, v6                  bool
+		version                 int
+		fixedIP, fixedInterface bool
+	}{
+		{"0.0.0.0", "", true, false, 4, false, false},
+		{"::", "", false, true, 6, false, false},
+		{"::", "", true, true, 0, false, false},
+		{"192.0.2.7", "", true, false, 4, true, false},
+		{"fe80::7", "7", false, true, 6, true, true},
+	} {
+		address := &net.TCPAddr{IP: net.ParseIP(tc.ip), Zone: tc.zone}
+		got := listenerPublicationPolicy(address, tc.v4, tc.v6, initial)
+		if got.IPVersion != tc.version || (len(got.Addresses) > 0) != tc.fixedIP || (len(got.Interfaces) > 0) != tc.fixedInterface {
+			t.Fatal("listener boundary changed", tc, got)
+		}
+		if tc.fixedIP {
+			address.IP[0] ^= 1
+			if got.Addresses[0].Equal(address.IP) {
+				t.Fatal("retained mutable listener address")
+			}
+		}
 	}
 }
 

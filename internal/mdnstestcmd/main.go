@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -77,7 +78,7 @@ func fixtureFile(path string) bool {
 	if strings.HasSuffix(path, ".go") {
 		return true
 	}
-	if path == "go.mod" || path == "go.sum" || path == "LICENSE" || path == "NOTICES.md" || path == "LICENSES/Apache-2.0.txt" {
+	if path == "go.mod" || path == "go.sum" || path == "LICENSE" || path == "NOTICES.md" || path == "LICENSES/Apache-2.0.txt" || path == "internal/mdns/LICENSE" {
 		return true
 	}
 	if path == "internal/mdnstestcmd/Containerfile" {
@@ -86,7 +87,7 @@ func fixtureFile(path string) bool {
 	if strings.HasPrefix(path, "internal/e2e/") {
 		name := strings.TrimPrefix(path, "internal/e2e/")
 		switch name {
-		case "server.py", "media.py", "mdns.py", "pairing_observer.py", "pyproject.toml", "uv.lock", ".python-version", "go.mod":
+		case "server.py", "media.py", "mdns.py", "mdns_monitor.py", "pairing_observer.py", "pyproject.toml", "uv.lock", ".python-version", "go.mod":
 			return true
 		}
 	}
@@ -227,9 +228,34 @@ func run(parentCtx context.Context, requested string) error {
 	if len(networks) != 1 || (networks[0]["internal"] != true && networks[0]["Internal"] != true) {
 		return errors.New("refusing topology test: second network is not internal")
 	}
+	observer := name + "-observer"
+	defer cleanup("rm", "--force", observer)
+	if out, err := exec.CommandContext(ctx, engine, "run", "--detach", "--name", observer, "--network", extra, "--cap-drop=ALL", "--entrypoint", "/workspace/var/python/e2e/bin/python", image, "internal/e2e/mdns_monitor.py").CombinedOutput(); err != nil {
+		return fmt.Errorf("start isolated observer: %w: %s", err, out)
+	}
+	observed, err := exec.CommandContext(ctx, engine, "inspect", observer).Output()
+	if err != nil {
+		return err
+	}
+	var containers []struct {
+		NetworkSettings struct {
+			Networks map[string]struct{ IPAddress string }
+		}
+	}
+	if err = json.Unmarshal(observed, &containers); err != nil {
+		return err
+	}
+	if len(containers) != 1 || len(containers[0].NetworkSettings.Networks) != 1 {
+		return errors.New("observer is not restricted to one private network")
+	}
+	observerIP := containers[0].NetworkSettings.Networks[extra].IPAddress
+	if ip := net.ParseIP(observerIP); ip == nil || ip.To4() == nil || !ip.IsPrivate() {
+		return errors.New("observer has no private IPv4 control address")
+	}
+	observerURL := "http://" + net.JoinHostPort(observerIP, "8081")
 	defer cleanup("rm", "--force", name)
 	fmt.Fprintln(os.Stderr, "[mdns] Running real multicast and independent Python discovery in an internal network (no published ports or host mounts).")
-	command := exec.CommandContext(ctx, engine, "run", "--name", name, "--network", name, "--cap-drop=ALL", "--env", "SENDSPIN_MDNS_TEST_NETWORK=internal", "--env", "SENDSPIN_MDNS_TEST_HOTPLUG=1", image)
+	command := exec.CommandContext(ctx, engine, "run", "--name", name, "--network", name, "--cap-drop=ALL", "--env", "SENDSPIN_MDNS_TEST_NETWORK=internal", "--env", "SENDSPIN_MDNS_TEST_HOTPLUG=1", "--env", "SENDSPIN_MDNS_OBSERVER_URL="+observerURL, image)
 	testLog, err := os.Create(filepath.Join(root, "var", "mdns", "tests.log"))
 	if err != nil {
 		return err

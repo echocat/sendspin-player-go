@@ -44,10 +44,12 @@ interface or a reused index. Callbacks stay serialized and cancellation is joine
 There must be an eligible interface at initial startup; snapshot/setup failures
 are returned, not silently treated as discovered peers.
 
-This refresh covers browsing. Advertisements remain bound to the listener's
-validated interface/address set; restart Serve with a new listener/advertisement
-when that binding changes. A live TCP session is not migrated between interfaces.
-Native Windows/macOS hotplug, arbitrary reflectors/VLANs and deployment policy
+Advertisements now refresh per interface too, preserving the listener's actual
+families, concrete IP and IPv6-zone restrictions rather than freezing the startup
+NIC list. New wildcard-listener addresses are published, stale bindings withdrawn,
+unchanged bindings retained and failed refreshes retried. No TCP listener is
+rebound or session migrated. See [publication lifecycle](dynamic-advertisement.md).
+Native Windows/macOS multicast hotplug, arbitrary reflectors/VLANs and deployment policy
 remain separate validation work.
 
 ## Run the real multicast suite
@@ -73,11 +75,13 @@ The runner:
 2. Builds a race-instrumented Linux test binary and the locked Python reference
    environment. Go, Python and uv base images are pinned by manifest digest.
 3. Creates and inspects uniquely named **internal dual-stack** container networks.
-4. Runs the fixture without host networking, published ports, bind mounts,
-   privileged mode or daemon-socket mounts; container capabilities are dropped.
+4. Runs the fixture and an independent IPv6 observer in separate namespaces
+   without host networking, published ports, bind mounts, privileged mode or
+   daemon-socket mounts; container capabilities are dropped. The observer is
+   attached only to the second internal network.
 5. Attaches/removes its second internal network at a bounded, ordered test request,
-   validating a newly discovered interface's IPv6 scope with an encrypted session
-   and resolver-socket cleanup. The container receives no daemon access or added
+   validating a newly discovered interface's IPv6 scope with an encrypted session,
+   IPv4/IPv6 publication on existing listeners and socket cleanup. The container receives no daemon access or added
    capabilities; only the runner controls its own two network objects.
 6. Removes its own container/networks and temporary context, including on normal
    interruption. Build/test logs remain under `var/mdns`; image layers stay

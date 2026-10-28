@@ -37,6 +37,7 @@ func (c *Client) Serve(ctx context.Context, listener net.Listener) error {
 	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var discoveryErrors <-chan error
 	if !c.cfg.DisableDiscovery {
 		service, err := c.serviceForListener(listener)
 		if err != nil {
@@ -47,6 +48,7 @@ func (c *Client) Serve(ctx context.Context, listener net.Listener) error {
 			return err
 		}
 		defer ad.Close()
+		discoveryErrors = ad.Errors()
 	}
 	var handlers sync.WaitGroup
 	var lifecycle sync.Mutex
@@ -73,10 +75,20 @@ func (c *Client) Serve(ctx context.Context, listener net.Listener) error {
 	}
 	go func() {
 		defer close(watcherDone)
-		select {
-		case <-ctx.Done():
-			stop()
-		case <-done:
+		for {
+			select {
+			case <-ctx.Done():
+				stop()
+				return
+			case <-done:
+				return
+			case err, ok := <-discoveryErrors:
+				if !ok {
+					discoveryErrors = nil
+					continue
+				}
+				c.emit(Event{Kind: "discovery_error", Err: err})
+			}
 		}
 	}()
 	err := server.Serve(listener)

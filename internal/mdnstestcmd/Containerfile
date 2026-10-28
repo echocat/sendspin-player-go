@@ -18,4 +18,5 @@ RUN uv sync --locked --project internal/e2e --python /usr/local/bin/python3.13
 COPY --from=build /src/var/bin/player.test ./var/bin/player.test
 COPY src/LICENSE src/NOTICES.md ./
 COPY src/LICENSES/ ./LICENSES/
+COPY src/internal/mdns/LICENSE ./LICENSES/zeroconf-MIT.txt
 ENTRYPOINT ["/workspace/var/bin/player.test", "-test.v", "-test.run=^TestMDNS", "-test.timeout=2m"]

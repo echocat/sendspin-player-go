@@ -2,6 +2,7 @@
 
 import asyncio
 import socket
+import sys
 
 from zeroconf import IPVersion, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
@@ -25,6 +26,22 @@ class MDNSPeer:
         ipv6 = self.config.get("family") == 6
         interfaces = [self.config["interface_index"]] if ipv6 else [address]
         self.zeroconf = AsyncZeroconf(interfaces=interfaces, ip_version=IPVersion.V6Only if ipv6 else IPVersion.V4Only)
+        await self.zeroconf.zeroconf.async_wait_for_start()
+        # Restrict only this independent peer's sockets to their own multicast
+        # memberships. Linux otherwise admits other interfaces' memberships;
+        # an AF_INET6 listener may also accept IPv4-mapped multicast packets.
+        # This is process-local socket configuration, not a protocol bypass.
+        if sys.platform.startswith("linux"):
+            seen = set()
+            engine = self.zeroconf.zeroconf.engine
+            for transport in [*engine.readers, *engine.senders]:
+                sock = transport.sock
+                if sock.fileno() in seen:
+                    continue
+                seen.add(sock.fileno())
+                sock.setsockopt(socket.IPPROTO_IP, 49, 0)  # IP_MULTICAST_ALL
+                if sock.family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, 29, 0)  # IPV6_MULTICAST_ALL
         self.browser = AsyncServiceBrowser(
             self.zeroconf.zeroconf, "_sendspin._tcp.local.", handlers=[self.on_client]
         )
@@ -58,7 +75,7 @@ class MDNSPeer:
             for key, value in info.properties.items()
         }
         addresses = info.parsed_scoped_addresses()
-        self.clients[instance] = {"port": info.port, "properties": properties, "addresses": addresses}
+        self.clients[instance] = {"port": info.port, "properties": properties, "addresses": addresses, "interface_index": info.interface_index, "hostname": info.server}
         if self.config["mode"] != "discover_clients" or instance != self.client_id:
             return
         path = properties.get("path")

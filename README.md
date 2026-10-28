@@ -22,6 +22,7 @@ Tests can use `slf4g/sdk/testlog` or `slf4g/testing/recording` without installin
 process-global provider.
 
 - Client- and server-initiated WebSockets, with mutually exclusive discovery modes.
+- Development after v0.1.0: [dynamic mDNS publication](docs/dynamic-advertisement.md) preserves live listener restrictions.
 - Noise `KKpsk2`, both RC1 cipher suites, PSK pairing, re-handshakes and unpairing.
 - Persistent identity, pairing records, output delay, volume and mute.
 - Player, controller, metadata, artwork, visualizer and color roles; individually enabled.

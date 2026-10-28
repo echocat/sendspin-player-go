@@ -20012,7 +20012,7 @@
         "unit:github.com/echocat/sendspin-player-go/discovery#TestIPv6LinkLocalUsesReceivingScopeAndEscapesTheRequestTarget",
         "unit:github.com/echocat/sendspin-player-go/discovery#TestTopologyWatcherJoinsOldScopesBeforeInterfaceReappearance"
       ],
-      "notes": "One resolver per receiving interface/family scopes link-local URLs with the local index and joins old generations on topology/address changes. Exact URL/scope, deterministic remove/reappear/address-change tests, isolated IPv6 multicast/encrypted sessions in both directions, and actual attach/removal of a second internal network with socket cleanup are independently selected. Browser refresh does not migrate TCP listeners or advertisements. Finite Linux namespace execution is not native Windows/macOS hotplug, reflector/VLAN behavior or universal deployment validation; platform/network work remains open."
+      "notes": "The source-pinned private mDNS transport rejects foreign/unknown kernel interface indices before record parsing/query dispatch; its Windows UDP packet-info adapter has native loopback tests. Browsing and per-interface publication reconcile topology changes without migrating TCP listeners. The isolated hotplug test observes both existing wildcard listener families from the added network (IPv6 observer in a separate namespace), validates scope/encrypted connection and requires socket cleanup. Snapshot/registration failure, retry, cancellation and immutable address/family/interface restrictions have focused unit tests. This does not establish native Windows/macOS multicast hotplug, arbitrary reflectors/VLANs or universal deployment behavior; the platform/network disposition remains open."
     },
     {
       "id": "CN17.01",

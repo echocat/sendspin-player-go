@@ -169,6 +169,7 @@ jobs:
           mise run lint:audit
           mise run audit:verify-spec
           mise run audit:verify-noise
+          mise run audit:verify-mdns
       - name: Generate and gate the pinned Linux software-evidence report
         if: always()
         run: go run ./internal/specauditcmd report --profile full --evidence var/audit/ci --goos linux --goarch amd64 --go-version go1.27.3

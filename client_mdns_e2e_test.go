@@ -4,9 +4,11 @@ package sendspin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -375,6 +377,22 @@ func TestMDNSActualInterfaceAttachAndRemoval(t *testing.T) {
 		t.Fatal("topology test requires the isolated runner control channel")
 	}
 	baseline := ownMDNSSockets(t)
+	// Both listeners stay open across hotplug. Neither publisher may freeze its
+	// startup interfaces or broaden its actual socket address family.
+	ad4, err := New(context.Background(), Config{Name: "Dynamic IPv4", Store: &MemoryStore{}, Roles: []Role{Controller}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port4, stop4 := serveMDNSAddress(t, ad4, "tcp4", &net.TCPAddr{IP: net.IPv4zero})
+	ad6, err := New(context.Background(), Config{Name: "Dynamic IPv6", Store: &MemoryStore{}, Roles: []Role{Controller}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port6, stop6 := serveMDNSAddress(t, ad6, "tcp6", &net.TCPAddr{IP: net.IPv6zero})
+	// Serve starts asynchronously. Establish both dual-family publisher socket
+	// sets before taking the baseline used for hotplug cleanup assertions.
+	eventually(t, func() bool { return ownMDNSSockets(t) == baseline+4 })
+	advertisingSockets := ownMDNSSockets(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	found := make(chan discovery.Endpoint, 16)
@@ -401,7 +419,7 @@ func TestMDNSActualInterfaceAttachAndRemoval(t *testing.T) {
 		})
 	}
 	t.Cleanup(stop)
-	eventually(t, func() bool { return ownMDNSSockets(t) > baseline })
+	eventually(t, func() bool { return ownMDNSSockets(t) > advertisingSockets })
 	if _, err := fmt.Fprintln(os.Stdout, "[mdns-topology] attach"); err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +462,104 @@ func TestMDNSActualInterfaceAttachAndRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := startReferenceWithOptions(t, cred, Secret{111}, false, map[string]any{"mdns": map[string]any{"mode": "advertise_server", "family": 6, "interface_index": added.Index, "address": ip.String()}})
+	ips, err := discovery.InterfaceIPs(added)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ip4 net.IP
+	for _, candidate := range ips {
+		if candidate.To4() != nil {
+			ip4 = candidate
+			break
+		}
+	}
+	if ip4 == nil {
+		t.Fatal("second isolated interface has no IPv4 address")
+	}
+	observer4 := startReferenceWithOptions(t, cred, Secret{111}, false, map[string]any{"no_record": true, "mdns": map[string]any{"mode": "observe_clients", "address": ip4.String()}})
+	assertAdvertisement := func(snapshot func() map[string]any, client *Client, port int, version int) {
+		t.Helper()
+		var record map[string]any
+		expected := 0
+		for _, candidate := range ips {
+			if (candidate.To4() != nil) == (version == 4) {
+				expected++
+			}
+		}
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Log("last dynamic advertisement", record, "expected interface", added.Index, added.Name, ips)
+			}
+		})
+		eventually(t, func() bool {
+			clients := snapshot()
+			raw, ok := clients[client.ClientID()]
+			if ok {
+				record = raw.(map[string]any)
+			}
+			if !ok || int(record["port"].(float64)) != port {
+				return false
+			}
+			addresses := record["addresses"].([]any)
+			if len(addresses) != expected {
+				return false
+			}
+			for _, raw := range addresses {
+				address, _, _ := strings.Cut(raw.(string), "%")
+				candidate := net.ParseIP(address)
+				found := false
+				for _, allowed := range ips {
+					found = found || allowed.Equal(candidate)
+				}
+				if !found || (candidate.To4() != nil) != (version == 4) {
+					return false
+				}
+			}
+			return true
+		})
+		if int(record["port"].(float64)) != port {
+			t.Fatal("advertisement changed the existing listener port", record)
+		}
+		got := record["addresses"].([]any)
+		if len(got) != expected {
+			t.Fatal("missing/extra interface addresses", got, ips, version)
+		}
+		for _, raw := range got {
+			address, _, _ := strings.Cut(raw.(string), "%")
+			candidate := net.ParseIP(address)
+			found := false
+			for _, allowed := range ips {
+				found = found || allowed.Equal(candidate)
+			}
+			if !found || (candidate.To4() != nil) != (version == 4) {
+				t.Fatal("publisher exposed an unbound address/family", got, version, "expected interface", added.Index, added.Name, ips, "record", record)
+			}
+		}
+	}
+	assertAdvertisement(func() map[string]any {
+		return observer4.control(t, map[string]any{"command": "status"})["mdns"].(map[string]any)["clients"].(map[string]any)
+	}, ad4, port4, 4)
+	observerURL := os.Getenv("SENDSPIN_MDNS_OBSERVER_URL")
+	if observerURL == "" {
+		t.Fatal("isolated observer control address missing")
+	}
+	transport := &http.Transport{}
+	t.Cleanup(transport.CloseIdleConnections)
+	control := &http.Client{Timeout: time.Second, Transport: transport}
+	assertAdvertisement(func() map[string]any {
+		response, err := control.Get(observerURL + "/status")
+		if err != nil {
+			return map[string]any{}
+		}
+		defer func() { _ = response.Body.Close() }()
+		var state struct {
+			Clients map[string]any `json:"clients"`
+		}
+		if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&state) != nil {
+			return map[string]any{}
+		}
+		return state.Clients
+	}, ad6, port6, 6)
 	var endpoint discovery.Endpoint
 	eventually(t, func() bool {
 		for {
@@ -494,8 +610,10 @@ func TestMDNSActualInterfaceAttachAndRemoval(t *testing.T) {
 	})
 	// The removed generation's per-interface UDP sockets must disappear while
 	// discovery remains live on the original interface.
-	eventually(t, func() bool { return ownMDNSSockets(t) == baseline+2 })
+	eventually(t, func() bool { return ownMDNSSockets(t) == advertisingSockets+2 })
 	stop()
+	stop4()
+	stop6()
 	if ownMDNSSockets(t) != baseline {
 		t.Fatal("topology changes leaked resolver sockets")
 	}

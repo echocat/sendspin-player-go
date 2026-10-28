@@ -166,6 +166,9 @@ mise run audit:check-conformance
 - `audit:verify-noise` verifies the independent Cacophony source and frozen subset;
   ordinary vector tests are offline and do not generate their own expected bytes.
   See [oracle scope](noise-vectors.md). The existing PortAudio CI is unchanged.
+- `audit:verify-mdns` reproduces/checks the private source-pinned mDNS adaptation
+  against its upstream SHA-256 values and explicit scope/logging transformations.
+  See [dynamic publication](dynamic-advertisement.md); ordinary tests stay offline.
 - `audit:report` renders available evidence without pretending unrun suites passed.
   This default `catalog` profile is an inspection report, not the complete
   software-execution gate.
