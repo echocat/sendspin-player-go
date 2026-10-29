@@ -8,13 +8,18 @@ import (
 
 func TestBuildContextContainsOnlyRequiredSources(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"go.mod", "go.sum", "client.go", "client_test.go", "device.json", "profile.cov", ".private.go", "_scratch/secret.go", ".git/config", ".idea/credentials.go", "_examples/player/main.go", "audio/portaudio/go.mod", "audio/portaudio/output.go", "internal/mdns/LICENSE", "internal/e2e/mdns_monitor.py", "internal/e2e/server.py", "internal/e2e/media.py", "internal/e2e/mdns.py", "internal/e2e/pairing_observer.py", "internal/e2e/uv.lock", "internal/e2e/.python-version", "internal/e2e/scratch.py", "var/tmp/private.go", "var/python/e2e/private.go", "var/conformance/capture.go"} {
+	for _, name := range []string{"go.mod", "go.sum", "client.go", "client_test.go", "device.json", "profile.cov", ".private.go", "_scratch/secret.go", ".git/config", ".idea/credentials.go", "_examples/player/main.go", "audio/native/go.mod", "audio/native/output.go", "internal/mdns/LICENSE", "internal/e2e/mdns_monitor.py", "internal/e2e/server.py", "internal/e2e/media.py", "internal/e2e/mdns.py", "internal/e2e/pairing_observer.py", "internal/e2e/weak_playback.py", "internal/e2e/source_controls.py", "internal/e2e/uv.lock", "internal/e2e/.python-version", "internal/e2e/scratch.py", "var/tmp/private.go", "var/python/e2e/private.go", "var/conformance/capture.go"} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"internal/e2e/weak_playback.py", "internal/e2e/source_controls.py"} {
+		if !fixtureFile(name) {
+			t.Fatal("reference server dependency missing from isolated fixture", name)
 		}
 	}
 	output := t.TempDir()
@@ -25,12 +30,12 @@ func TestBuildContextContainsOnlyRequiredSources(t *testing.T) {
 	if len(digest) != 16 {
 		t.Fatal(digest)
 	}
-	for _, name := range []string{"client.go", "internal/mdns/LICENSE", "internal/e2e/mdns_monitor.py", "internal/e2e/mdns.py", "internal/e2e/pairing_observer.py", "internal/e2e/uv.lock", "internal/e2e/.python-version"} {
+	for _, name := range []string{"client.go", "internal/mdns/LICENSE", "internal/e2e/mdns_monitor.py", "internal/e2e/mdns.py", "internal/e2e/pairing_observer.py", "internal/e2e/weak_playback.py", "internal/e2e/source_controls.py", "internal/e2e/uv.lock", "internal/e2e/.python-version"} {
 		if _, err = os.Stat(filepath.Join(output, "src", name)); err != nil {
 			t.Fatal("missing fixture asset", name, err)
 		}
 	}
-	for _, name := range []string{"device.json", "profile.cov", ".private.go", "_scratch/secret.go", ".git/config", ".idea/credentials.go", "_examples/player/main.go", "audio/portaudio/go.mod", "audio/portaudio/output.go", "internal/e2e/scratch.py", "var/tmp/private.go", "var/python/e2e/private.go", "var/conformance/capture.go"} {
+	for _, name := range []string{"device.json", "profile.cov", ".private.go", "_scratch/secret.go", ".git/config", ".idea/credentials.go", "_examples/player/main.go", "audio/native/go.mod", "audio/native/output.go", "internal/e2e/scratch.py", "var/tmp/private.go", "var/python/e2e/private.go", "var/conformance/capture.go"} {
 		if _, err = os.Stat(filepath.Join(output, "src", name)); !os.IsNotExist(err) {
 			t.Fatal("copied private/non-fixture asset", name, err)
 		}
