@@ -213,6 +213,14 @@ run = "go run ./internal/specauditcmd run --suite alsa"
 description = "LIVE PLAY! 3 SDK loopback: cable already connected, five-second capture, no prompts, leaves output muted"
 run = 'bash "{{config_root}}/mise-tasks/play3-low-level-loopback.sh" --acknowledge-unverified-wiring --capture-gain-24db --sdk-output --connected-leave-muted'
 
+[tasks."test:alsa:e2e"]
+description = "LIVE PLAY! 3: three-minute independent-server PCM/FLAC, pause/reconnect/stop; no capture, no prompts, leaves muted"
+run = 'bash "{{config_root}}/mise-tasks/play3-low-level-loopback.sh" --acknowledge-unverified-wiring --capture-gain-24db --sdk-output --connected-leave-muted --e2e'
+
+[tasks."test:alsa:e2e:virtual"]
+description = "SOFTWARE ONLY: independent-server scenario with virtual output; no audio devices, mixers or capture"
+run = 'bash "{{config_root}}/mise-tasks/alsa-e2e-virtual.sh"'
+
 [tasks."test:alsa:stub"]
 description = "Test ALSA fake devices and unavailable-native-platform behavior without CGO"
 dir = "audio/alsa"

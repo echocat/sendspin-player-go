@@ -41,6 +41,8 @@ the limitations described below. Results stay under the same private `var` tree.
 
 The interactive alternatives below remain available when automatic restoration
 after confirmed cable disconnection is preferred.
+For the subsequent three-minute encrypted server/SDK playback scenario, use the
+separate [ALSA E2E task](alsa-e2e.md), which opens no microphone input.
 
 ## Preconditions and command (Nushell)
 

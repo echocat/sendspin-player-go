@@ -33,6 +33,7 @@ def save(): statepath.write_text(json.dumps(state))
 if tool == "go":
     shutil.copyfile(__file__, args[args.index("-o") + 1])
     os.chmod(args[args.index("-o") + 1], 0o700)
+elif tool == "uv": pass
 elif tool == "loopback":
     if args[0] == "generate":
         path = pathlib.Path(args[args.index("-out") + 1])
@@ -85,9 +86,16 @@ elif tool in ["arecord", "aplay", "sdk-playback"]:
     if fault == "record" and tool == "arecord": sys.exit(1)
     if fault == "play" and tool in ["aplay", "sdk-playback"]: sys.exit(1)
     if tool == "sdk-playback":
-        assert os.environ["SENDSPIN_ALSA_REFERENCE_PLAYBACK"] == "1"
         assert pathlib.Path(os.environ["SENDSPIN_ALSA_REFERENCE_FILE"]).name == "reference.wav"
-        assert args == ["-test.run", "^TestHardwareWeakReferencePlayback$", "-test.v", "-test.timeout=5s"]
+        if os.environ.get("SENDSPIN_ALSA_E2E_PLAYBACK") == "1":
+            assert args == ["-test.run", "^TestReferenceServerPlaybackScenario$", "-test.v", "-test.timeout=250s"]
+            assert os.environ["SENDSPIN_ALSA_E2E_VIRTUAL"] == ""
+            assert pathlib.Path(os.environ["SENDSPIN_ALSA_E2E_ROOT"]).is_absolute()
+            pathlib.Path(os.environ["SENDSPIN_ALSA_E2E_ARTIFACT_DIR"], "e2e-report.json").write_text('{"status":"fake-only"}')
+            if fault == "e2e-hang": time.sleep(60)
+        else:
+            assert os.environ["SENDSPIN_ALSA_REFERENCE_PLAYBACK"] == "1"
+            assert args == ["-test.run", "^TestHardwareWeakReferencePlayback$", "-test.v", "-test.timeout=5s"]
     if tool == "arecord":
         sys.stdout.buffer.write(b"SYNTHETIC ONLY")
         time.sleep(60 if fault == "record-timeout" else 2)
@@ -113,7 +121,7 @@ class SmokeHarnessTest(unittest.TestCase):
             fake = tools / "fake"
             fake.write_text(f"#!{sys.executable}\n" + FAKE)
             fake.chmod(0o700)
-            for tool in ["go", "amixer", "alsactl", "arecord", "aplay", "sleep"]:
+            for tool in ["go", "uv", "amixer", "alsactl", "arecord", "aplay", "sleep"]:
                 (tools / tool).symlink_to(fake)
             before = {
                 "Speakerplaybackgain": -20, "Speakerplaybackswitch": "on",
@@ -179,9 +187,10 @@ class SmokeHarnessTest(unittest.TestCase):
                                 self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
                             os.write(fd, answer)
                             answered.add(prompt)
-                    if cancel == "recording" and not cancel_sent:
+                    if cancel in ["recording", "e2e"] and not cancel_sent:
                         events_path = root / "events.jsonl"
-                        if events_path.exists() and any(json.loads(s)[0] == "arecord" for s in events_path.read_text().splitlines()):
+                        target = "sdk-playback" if cancel == "e2e" else "arecord"
+                        if events_path.exists() and any(json.loads(s)[0] == target for s in events_path.read_text().splitlines()):
                             os.write(fd, b"\x03")
                             cancel_sent = True
                 else:
@@ -293,6 +302,34 @@ class SmokeHarnessTest(unittest.TestCase):
         self.assertEqual(state["Speakerplaybackswitch"], "off")
         self.assertEqual(state["Micplaybackswitch"], "off")
         self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
+
+    def test_e2e_mode_uses_independent_scenario_without_capture_or_prompts(self):
+        code, output, events, state, _ = self.run_harness(capture_24db=True, extra_args=("--sdk-output", "--e2e"), connected=True, terminal=False)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("VORBEREITEN", output)
+        self.assertNotIn("ABGEZOGEN", output)
+        self.assertFalse(any(e[0] in ["arecord", "aplay"] for e in events))
+        self.assertEqual(sum(e[0] == "sdk-playback" and e[1] == "start" for e in events), 1)
+        setup = next(i for i,e in enumerate(events) if e[0] == "uv")
+        change = next(i for i,e in enumerate(events) if e[0] == "amixer" and "sset" in e[2])
+        self.assertLess(setup, change)
+        self.assertEqual(state["Speakerplaybackswitch"], "off")
+        self.assertEqual(state["Micplaybackswitch"], "off")
+
+    def test_e2e_failure_still_mutes_without_capture_or_restore(self):
+        code, output, events, state, _ = self.run_harness(fault="play", capture_24db=True, extra_args=("--sdk-output", "--e2e"), connected=True, terminal=False)
+        self.assertNotEqual(code, 0, output)
+        self.assertFalse(any(e[0] in ["arecord", "aplay"] for e in events))
+        self.assertEqual(state["Speakerplaybackswitch"], "off")
+        self.assertEqual(state["Micplaybackswitch"], "off")
+
+    def test_e2e_ctrl_c_stops_player_without_capture_or_prompts(self):
+        code, output, events, state, _ = self.run_harness(fault="e2e-hang", cancel="e2e", capture_24db=True, extra_args=("--sdk-output", "--e2e"), connected=True)
+        self.assertEqual(code, 130, output)
+        self.assertTrue(any(e[0] == "sdk-playback" and e[1] == "stopped" for e in events))
+        self.assertFalse(any(e[0] in ["arecord", "aplay"] for e in events))
+        self.assertEqual(state["Speakerplaybackswitch"], "off")
+        self.assertEqual(state["Micplaybackswitch"], "off")
 
     def test_opt_in_flag_is_required_before_any_tool_access(self):
         code, _, events, state, before = self.run_harness(acknowledge=False)

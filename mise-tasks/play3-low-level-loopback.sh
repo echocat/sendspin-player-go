@@ -100,9 +100,9 @@ finish() {
 }
 
 main() {
-    local capture_db=0 capture_min_db=-999 sdk_output=0 option
-    if [[ $# -lt 1 || $# -gt 4 || "$1" != --acknowledge-unverified-wiring ]]; then
-        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output] [--connected-leave-muted]'
+    local capture_db=0 capture_min_db=-999 sdk_output=0 e2e=0 option
+    if [[ $# -lt 1 || $# -gt 5 || "$1" != --acknowledge-unverified-wiring ]]; then
+        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output] [--connected-leave-muted] [--e2e]'
         return 2
     fi
     shift
@@ -117,6 +117,9 @@ main() {
             --connected-leave-muted)
                 [[ "$connected_leave_muted" == 0 ]] || { fail 'Duplicate connected option.'; return 2; }
                 connected_leave_muted=1 ;;
+            --e2e)
+                [[ "$e2e" == 0 ]] || { fail 'Duplicate E2E option.'; return 2; }
+                e2e=1 ;;
             *) fail 'Unsupported option; no automatic gain escalation or device fallback.'; return 2 ;;
         esac
     done
@@ -126,6 +129,9 @@ main() {
     if [[ "$connected_leave_muted" == 1 && "$sdk_output" != 1 ]]; then
         fail 'Connected mode requires the explicit SDK comparison profile.'; return 2
     fi
+    if [[ "$e2e" == 1 && "$connected_leave_muted" != 1 ]]; then
+        fail 'E2E requires the explicit preconnected SDK profile.'; return 2
+    fi
     [[ "$(uname -s)" == Linux ]] || { fail 'Linux/WSL only.'; return 2; }
     if [[ "$connected_leave_muted" == 1 ]]; then
         exec {terminal_fd}>&2
@@ -133,9 +139,10 @@ main() {
         [[ -t 0 && -t 1 ]] || { fail 'An interactive terminal is required; no piped confirmations.'; return 2; }
         exec {terminal_fd}<> /dev/tty
     fi
-    for tool in amixer alsactl arecord timeout awk mktemp go grep sleep mkdir cmp cat; do command -v "$tool" >/dev/null || return 2; done
+    for tool in amixer alsactl timeout awk mktemp go grep sleep mkdir cmp cat; do command -v "$tool" >/dev/null || return 2; done
+    if [[ "$e2e" == 0 ]]; then command -v arecord >/dev/null || return 2; else command -v uv >/dev/null || return 2; fi
     if [[ "$sdk_output" == 0 ]]; then command -v aplay >/dev/null || return 2; fi
-    local root tool speaker mic playback_log
+    local root tool speaker mic playback_log capture_seconds=5
     root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
     printf '%s\n' \
         'PLAY! 3 / S3 only. Close other audio applications using this card.' \
@@ -144,7 +151,12 @@ main() {
         'Only an ordinary straight 3.5mm stereo TRS cable (two insulating rings on EACH plug).' \
         'No mono/TRRS cable, splitter, headphones or speakers; no joining L/R outputs.' \
         '3s reference, left only, peak 0.01 (-40dBFS); speaker <= -40dB.' \
-        'Five seconds of private microphone recording. No automatic gain increase/retry.'
+        'No automatic gain increase/retry.'
+    if [[ "$e2e" == 1 ]]; then
+        printf 'E2E: approximately 3 minutes of PCM/FLAC playback, pause/resume, reconnect and stop. NO microphone recording.\n'
+    else
+        printf 'Five seconds of private microphone recording.\n'
+    fi
     printf 'Requested capture gain: %sdB; +24dB requires the explicit extra flag and separate consent.\n' "$capture_db"
     printf 'SDK output selected: %s (0=aplay baseline, 1=SDK ALSA Next/Write/Flush/Close).\n' "$sdk_output"
     if [[ "$connected_leave_muted" == 1 ]]; then
@@ -158,7 +170,10 @@ main() {
     trap finish EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
-    printf 'capture_gain_db=%s\nsdk_output=%s\nconnected_leave_muted=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" "$sdk_output" "$connected_leave_muted" > "$work/run-settings.txt"
+    if [[ "$e2e" == 1 ]]; then capture_seconds=0; fi
+    printf 'capture_gain_db=%s\nsdk_output=%s\nconnected_leave_muted=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=%s\n' "$capture_db" "$sdk_output" "$connected_leave_muted" "$capture_seconds" > "$work/run-settings.txt"
+    printf 'e2e=%s\n' "$e2e" >> "$work/run-settings.txt"
+    if [[ "$e2e" == 1 ]]; then printf 'capture_opened=false\n' >> "$work/run-settings.txt"; fi
 
     if [[ "$connected_leave_muted" == 1 ]]; then
         check_switch "$(mixer sget Mic)" Playback off || { fail 'Mic monitor is already active; aborting without playback. Disconnect the cable before changing monitoring.'; return 1; }
@@ -171,6 +186,11 @@ main() {
     if [[ "$sdk_output" == 1 ]]; then
         CGO_ENABLED=1 go -C "$root/audio/alsa" test -c -o "$work/sdk-playback" . > "$work/sdk-build.log" 2>&1
         playback_log="$work/sdk-playback.log"
+        if [[ "$e2e" == 1 ]]; then
+            UV_PROJECT_ENVIRONMENT="$root/var/python/e2e" PYTHONPYCACHEPREFIX="$root/var/python/pycache" \
+                uv sync --locked --project "$root/internal/e2e" > "$work/python-setup.log" 2>&1
+            playback_log="$work/sdk-e2e.log"
+        fi
     else
         playback_log="$work/aplay.log"
     fi
@@ -210,21 +230,29 @@ main() {
         fail 'Mixer changed while waiting; aborting.'; return 1
     fi
 
-    # Open a new private regular file ourselves. No implicit/default input device.
-    timeout --kill-after=1s 7s arecord --device hw:CARD=S3,DEV=0 --file-type wav \
-        --format S16_LE --rate 48000 --channels 2 --duration 5 \
-        --disable-resample --disable-channels --disable-format --disable-softvol \
-        > "$work/capture.wav" 2> "$work/arecord.log" &
-    capture_pid=$!
-    sleep 0.5
-    kill -0 "$capture_pid" 2>/dev/null || { wait "$capture_pid"; fail 'Recorder ended before playback.'; return 1; }
+    if [[ "$e2e" == 0 ]]; then
+        # Open a new private regular file ourselves. No implicit/default input.
+        timeout --kill-after=1s 7s arecord --device hw:CARD=S3,DEV=0 --file-type wav \
+            --format S16_LE --rate 48000 --channels 2 --duration 5 \
+            --disable-resample --disable-channels --disable-format --disable-softvol \
+            > "$work/capture.wav" 2> "$work/arecord.log" &
+        capture_pid=$!
+        sleep 0.5
+        kill -0 "$capture_pid" 2>/dev/null || { wait "$capture_pid"; fail 'Recorder ended before playback.'; return 1; }
+    fi
     mixer sset Speaker playback unmute >> "$work/setup.log" 2>&1
     speaker="$(mixer sget Speaker)"; mic="$(mixer sget Mic)"
     if ! check_levels "$speaker" Playback -40 || ! check_switch "$speaker" Playback on || \
         ! check_levels "$mic" Capture "$capture_db" "$capture_min_db" || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
         fail 'Playback/monitor recheck failed.'; return 1
     fi
-    if [[ "$sdk_output" == 1 ]]; then
+    if [[ "$e2e" == 1 ]]; then
+        printf 'Running bounded independent-server E2E now (about 3 minutes); progress is retained in sdk-e2e.log.\n'
+        SENDSPIN_ALSA_E2E_PLAYBACK=1 SENDSPIN_ALSA_E2E_VIRTUAL='' SENDSPIN_ALSA_E2E_ROOT="$root" \
+            SENDSPIN_ALSA_E2E_ARTIFACT_DIR="$work" SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
+            timeout --kill-after=1s 260s "$work/sdk-playback" -test.run '^TestReferenceServerPlaybackScenario$' -test.v -test.timeout=250s > "$playback_log" 2>&1 &
+        playback_pid=$!
+    elif [[ "$sdk_output" == 1 ]]; then
         SENDSPIN_ALSA_REFERENCE_PLAYBACK=1 SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
             timeout --kill-after=1s 5s "$work/sdk-playback" -test.run '^TestHardwareWeakReferencePlayback$' -test.v -test.timeout=5s > "$playback_log" 2>&1 &
         playback_pid=$!
@@ -237,9 +265,12 @@ main() {
     wait "$playback_pid"
     playback_pid=''
     mixer sset Speaker playback mute >> "$work/setup.log" 2>&1
-    wait "$capture_pid"
-    capture_pid=''
+    if [[ "$e2e" == 0 ]]; then wait "$capture_pid"; capture_pid=''; fi
     if [[ "$sdk_output" == 1 ]]; then cat "$playback_log"; fi
+    if [[ "$e2e" == 1 ]]; then
+        printf 'E2E receipt: %s/e2e-report.json (no capture).\n' "$work"
+        return 0
+    fi
     if grep -Eiq 'overrun|underrun|xrun' "$work/arecord.log" "$playback_log"; then
         fail 'ALSA reported an xrun; retain diagnostics, do not treat this as a clean run.'
         return 1

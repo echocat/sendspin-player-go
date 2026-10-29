@@ -207,6 +207,11 @@ func TestALSASuitePinsHardwareOptOutAndDoesNotInheritEvidence(t *testing.T) {
 	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_REFERENCE_PLAYBACK=") {
 		t.Fatal("ordinary ALSA evidence must explicitly disable nonzero reference playback")
 	}
+	for _, flag := range []string{"SENDSPIN_ALSA_E2E_PLAYBACK=", "SENDSPIN_ALSA_E2E_VIRTUAL="} {
+		if !slices.Contains(calls[0].env, flag) {
+			t.Fatal("ordinary ALSA evidence must disable independent-server opt-ins")
+		}
+	}
 	report, err := p.Report(ReportOptions{Profile: "alsa"})
 	if err != nil {
 		t.Fatal(err)
