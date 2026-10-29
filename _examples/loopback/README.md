@@ -85,6 +85,9 @@ normal output level to it. Pinout, attenuation, input bias and levels must be
 checked with a suitable measurement connection before any live signal/capture.
 The generated low digital amplitude is **not** a guarantee of safe analog level.
 No driver support or device behavior has been inferred from these file tests.
+The separately consent-gated [PLAY! 3 direct-cable experiment](../../docs/play3-low-level-loopback.md)
+documents an explicitly unverified low-level attempt, its remaining electrical
+risks and disconnect-before-restore procedure. It is not part of this offline tool.
 
 ## Supported and bounded inputs
 

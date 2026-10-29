@@ -20,6 +20,8 @@ and 44.1/48kHz capture. Its analog microphone input is not a line-in; two USB
 channels do not prove two independent analog inputs. Do not blindly wire the
 headphone output back into that input. A proper level/pinout/bias-safe connection
 is a separate prerequisite for later nonzero loopback measurements.
+An explicitly accepted [unverified direct-cable experiment](play3-low-level-loopback.md)
+is a separate manual workflow, never an extension of this zero-only smoke.
 
 ## Run from the repository root (Nushell)
 
