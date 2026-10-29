@@ -11,4 +11,4 @@ UV_PROJECT_ENVIRONMENT="$root/var/python/e2e" PYTHONPYCACHEPREFIX="$root/var/pyt
 CGO_ENABLED=0 go -C "$root/_examples/loopback" run . generate -out "$work/reference.wav" -seconds 3 -amplitude 0.01 > "$work/generate.log" 2>&1
 CGO_ENABLED=0 SENDSPIN_ALSA_E2E_PLAYBACK='' SENDSPIN_ALSA_E2E_VIRTUAL=1 \
     SENDSPIN_ALSA_E2E_ROOT="$root" SENDSPIN_ALSA_E2E_ARTIFACT_DIR="$work" SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
-    go -C "$root/audio/alsa" test -count=1 -v -run '^TestReferenceServerPlaybackScenario$' -timeout=90s .
+    go -C "$root/audio/alsa" test -tags=e2e -count=1 -v -run '^TestReferenceServerPlaybackScenario$' -timeout=90s .

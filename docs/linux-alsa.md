@@ -1,20 +1,17 @@
 # Direct Linux ALSA output (unreleased)
 
-`audio/alsa` is an independent optional Go module. It uses libasound directly,
-without Oto or PortAudio. The root SDK remains pure Go and gains no native
-dependency. The backend requires Linux, CGO, a C compiler, `pkg-config` and ALSA
-development files (`libasound2-dev` on Debian/Ubuntu/Raspberry Pi OS;
-`alsa-lib-devel` on Fedora). Native constraints are automatic, not custom tags.
-Deployed dynamically linked binaries also need the libasound runtime
+`audio/alsa` is a root-module package. It uses libasound directly through purego,
+without Oto or PortAudio, CGO, a C compiler, `pkg-config` or development headers.
+Native constraints are automatic; only opt-in E2E tests use a custom `e2e` tag.
+Linux amd64/arm64 binaries need the libasound runtime
 (`libasound2`/`libasound2t64` or `alsa-lib`, depending on the distribution).
-Other systems and CGO-free builds expose an `ErrUnavailable` stub.
+Other systems expose an `ErrUnavailable` stub; Linux works with `CGO_ENABLED=0`.
 libasound is a system LGPL-2.1-or-later dependency, not vendored SDK source.
 
-This module is **not in v0.1.1 and has no release tag yet**. Work from this
+This package is **not in v0.1.1 and has no release tag yet**. Work from this
 checkout until a release is explicitly prepared. For a local consumer use an
-explicit `replace github.com/echocat/sendspin-player-go/audio/alsa => /path/to/checkout/audio/alsa`.
-Its root SDK requirement is the published v0.1.1, not a nonexistent development
-version. Existing published tags are unchanged.
+explicit `replace github.com/echocat/sendspin-player-go => /path/to/checkout`.
+Existing published tags are unchanged.
 
 ## Integration
 
@@ -30,13 +27,13 @@ discovery result. Prefer stable `CARD=` names over hotplug-sensitive card number
 `aplay -l` from ALSA utilities can list hardware playback cards without playing audio.
 Construction/import does not open audio. Only `Open` opens a playback PCM;
 `Next`/first `Write` starts it with bounded digital silence pre-roll. The package
-never opens capture, changes mixer volume, changes the system default, or
-reconfigures an audio server. ALSA's own errors may go to stderr; the SDK does
+does not implicitly open capture, change mixer volume, change the system default,
+or reconfigure an audio server. Separate `Input.Open`/`Read` explicitly starts
+capture only when requested. ALSA's own errors may go to stderr; the SDK does
 not install process-global ALSA error handlers. Optional `Logger` uses only the
 slf4g base facade and omits device names and raw errors; sinks must return promptly.
 
-The existing Oto/PortAudio player example is deliberately unchanged: selecting
-ALSA in a consumer does not require those modules or their native libraries.
+Oto and PortAudio backends/example selections are retired.
 
 ## Hardware versus desktops
 
@@ -55,8 +52,8 @@ ALSA in a consumer does not require those modules or their native libraries.
   still return errors; there is no silent fallback to another backend.
 - ALSA reaches current Linux desktops through their configured plugins, but a
   direct [PipeWire backend](native-desktop-audio.md) is the desktop-native
-  complement. The same optional module also provides Windows WASAPI and macOS
-  CoreAudio outputs. All are unreleased and physically unmeasured.
+  complement. Root packages also provide Windows WASAPI and macOS CoreAudio.
+  All are unreleased and physically unmeasured.
 
 ## Scheduling and lifecycle
 
@@ -104,13 +101,15 @@ PCM with a private per-handle configuration (host aliases cannot redirect it to
 hardware), and uses fake PCMs for timing, partial writes, cancellation and drop/close
 faults. It explicitly clears the live-test opt-in. Evidence is retained under
 `var/audit/evidence/alsa`; `report --profile alsa` keeps it separate from the
-PortAudio/native profile and all physical conformance requirements.
+desktop-audio profile and all physical conformance requirements. The complete
+[test/CI contract](native-audio-tests.md) documents the platform matrix, private
+software graph, independent-server scenarios and native marker loopback.
 
 For an **explicit silence-only hardware lifecycle test**, run in `audio/alsa`
 after checking the selected card. Example in Nushell:
 
 ```nu
-with-env {CGO_ENABLED: "1", SENDSPIN_ALSA_SILENCE_DEVICE: "hw:CARD=Device,DEV=0"} {
+with-env {CGO_ENABLED: "0", SENDSPIN_ALSA_SILENCE_DEVICE: "hw:CARD=Device,DEV=0"} {
     mise exec -- go test -count=1 -v -run '^TestHardwareSilenceLifecycle$' .
 }
 ```
@@ -124,7 +123,9 @@ It is test-only, never part of ordinary/CI execution, and not a latency test.
 
 When the USB output-to-line-in loopback card arrives, first identify its output
 and input routes and verify safe levels. Actual nonzero signals and line-in
-capture need a separate explicit measurement run; none is enabled here. Measure
+capture need a separate explicit measurement run. The tagged `TestNativeLoopback`
+requires `SENDSPIN_ALSA_LOOPBACK_DEVICE` and detects known reference markers through
+the native Input API; without it the test skips before any device operation. Measure
 startup, sustained drift, underrun/restart and flush/stop residuals. A single
 loopback measures **output + input** latency; absolute +/-1ms output accuracy
 additionally needs calibrated capture latency or a common-clock reference.

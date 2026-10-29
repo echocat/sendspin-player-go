@@ -32,6 +32,7 @@ from media import MediaControls
 from mdns import MDNSPeer
 from pairing_observer import PairingObserver
 from weak_playback import WeakPlayback
+from source_controls import SourceControls
 
 
 class ControlledStore(InMemoryServerPairingStore):
@@ -124,6 +125,7 @@ async def main(config_path):
 
     server.add_event_listener(observe_event)
     media = MediaControls(server)
+    sources = SourceControls(server, client_id) if config.get("observe_source", False) else None
     weak = WeakPlayback(config["weak_reference_path"]) if "weak_reference_path" in config else None
     stream = None
     pump_task = None
@@ -138,6 +140,8 @@ async def main(config_path):
         command = await request.json()
         client = server.get_client(client_id)
         kind = command["command"]
+        if sources is not None and kind in sources.commands:
+            return web.json_response(await sources.run(client, command))
         if kind in ("weak_start", "weak_stop", "weak_disconnect", "weak_status"):
             if weak is None:
                 raise web.HTTPConflict(text="weak reference scenario is not configured")
@@ -362,6 +366,8 @@ async def main(config_path):
         if mdns is not None:
             await mdns.close()
         await server.close()
+        if sources is not None:
+            await sources.close()
         await runner.cleanup()
         if pairing_observer is not None:
             pairing_observer.close()

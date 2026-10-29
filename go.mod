@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	filippo.io/edwards25519 v1.2.0
 	github.com/coder/websocket v1.8.15
-	github.com/ebitengine/oto/v3 v3.5.1
+	github.com/ebitengine/purego v0.11.2
 	github.com/echocat/slf4g v1.9.0
 	github.com/flynn/noise v1.1.0
 	github.com/mewkiz/flac v1.0.14
@@ -18,9 +18,7 @@ require (
 )
 
 require (
-	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
-	github.com/jfreymuth/pulse v0.1.3 // indirect
 	github.com/mewkiz/pkg v0.0.0-20260703220044-4fb89b18cc87 // indirect
 	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
 )

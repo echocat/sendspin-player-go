@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrUnavailable  = errors.New("alsa: native output requires Linux, CGO and libasound")
+	ErrUnavailable  = errors.New("alsa: native output requires supported Linux and libasound")
 	ErrPluginTiming = errors.New("alsa: non-hardware route requires explicit AllowPluginTiming")
 	ErrTiming       = errors.New("alsa: invalid or unavailable native timing")
 	ErrClockReset   = errors.New("alsa: PCM timing changed during a scheduled write")
@@ -28,6 +28,9 @@ var logger = log.GetLoggerForCurrentPackage()
 // changes the system default/mixer. A direct hardware device can be selected
 // explicitly (for example hw:CARD=Device,DEV=0). No resampling is negotiated.
 type Output struct {
+	// SharedLibPath selects exactly this libasound file; empty uses libasound.so.2.
+	// Explicit load/symbol failures never fall back to the default library.
+	SharedLibPath  string
 	Device         string
 	BufferDuration time.Duration
 	PeriodDuration time.Duration

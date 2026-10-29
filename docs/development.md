@@ -4,6 +4,19 @@ The repository follows cli4g's library-first layout: public API at the root,
 focused public subpackages, private `internal` implementations, independent
 `_examples` modules, docs, mise tasks/locks, and GitHub Actions.
 
+**Unreleased migration:** `v0.1.1` remains the recommended stable release, but
+does not include the new Source, PIN, host-managed player-control or purego backend
+APIs. Concrete audio backends are moving into root packages `audio/alsa`,
+`audio/pipewire`, `audio/wasapi`, `audio/coreaudio` and `audio/noop`; only the optional
+`audio/native` selector remains a separate module. Oto/PortAudio are no longer
+current development backends. Native implementations are still WIP. Historical
+release tags and recorded results are not rewritten by this migration.
+
+Production SDK/backend builds target `CGO_ENABLED=0`, using purego/system dynamic
+libraries without audio development headers or a C compiler. Runtime libraries,
+services and permissions are still required when opening a device. OS-specific
+implementation files are selected at compile time, not by a runtime GOOS switch.
+
 Tool requests are in `mise.toml`; exact tool artifacts are in `mise.lock`.
 The Python reference environment has its own `uv.lock`. There are no floating
 reference-server dependencies in the E2E suite. Do not update its pin without
@@ -18,24 +31,28 @@ a container runtime or access to the developer's LAN.
 
 | Command | Purpose |
 | --- | --- |
-| `mise run format` | Format code and tidy dependencies in the SDK, PortAudio module and example |
+| `mise run format` | Format/tidy the SDK/root backends, optional selector and configured example modules; regenerate audit tables |
 | `mise run format:check` | Show formatting differences without rewriting files |
-| `mise run lint` | Aggregate of lint:go, lint:actions, lint:backends and lint:examples |
+| `mise run lint` | Aggregate of lint:go, lint:actions, lint:backends, lint:examples and lint:audit |
 | `mise run lint:go` | SDK golangci-lint (including govet), formatting, module files and tagged sources |
 | `mise run lint:actions` | GitHub Actions workflow checks |
 | `mise run lint:examples` | Independent examples' formatting and module files |
-| `mise run lint:backends` | Independent backend modules' formatting and module files |
+| `mise run lint:backends` | Optional native selector's formatting/module checks; concrete backends belong to root lint |
 | `mise run lint:audit` | Validate machine-readable requirements, actual test links and generated audit |
 | `mise run format:audit` | Regenerate the human clause tables from their source catalog |
 | `mise run audit:report` | Generate var/audit/report.md and report.json from available evidence |
 | `mise run audit:verify-spec` | Explicit network verification of pinned source/paragraph fingerprints |
 | `mise run audit:check-conformance` | Strict, currently blocked normative/hardware conformance gate |
-| `mise run lint:native` | Lint PortAudio plus its example; native development headers required |
+| `mise run lint:native` | Lint purego backends, optional selector and native examples without audio development headers |
 | `mise run test` | Unit/integration tests with race detection |
 | `mise run test:examples` | Test example selection without CGO or audio hardware |
-| `mise run test:native` | Separate PortAudio module and CGO example tests; native headers required |
-| `mise run build:example:oto` | Build var/bin/oto/player without CGO |
-| `mise run build:example:portaudio` | Build var/bin/portaudio/player with CGO and native PortAudio |
+| `mise run test:native` | Aggregate desktop-audio, ALSA and example software checks; no hardware opt-in |
+| `mise run test:desktop-audio` | Record current root-backend ABI/clock/callback software evidence |
+| `mise run test:desktop-audio:stub` | CGO-free root audio tests; no real-device opt-in |
+| `mise run test:desktop-audio:race` | Optional race-instrumented audio tests; CGO is for Go's race runtime |
+| `mise run test:alsa` | Record purego ALSA null-PCM/fake-device software evidence |
+| `mise run build:example` | Build the native player under var/bin/native without CGO |
+| `mise run test:desktop-audio:e2e` / `test:alsa:e2e:optin` | Tagged native scenarios; visibly SKIP before device operations without explicit device ENV |
 | `mise run test:coverage` | Atomic Go coverage in var/coverage/unit.cov |
 | `mise run test:e2e` | Independent reference-server tests |
 | `mise run test:conformance` | 15 selected official-harness cases with a local SDK adapter |
@@ -46,7 +63,7 @@ a container runtime or access to the developer's LAN.
 | `mise run test:fuzz` | Bounded envelope/model, RFC language tags, fragments, PCM, media, activation/control/visualizer models, exact metadata positions and NTP arithmetic |
 | `mise run test:module` | Extract and test a distributable module zip |
 | `mise run vuln` | Reachable Go vulnerability scan |
-| `mise run check:full` | Core, CGO-free example and independent-reference gates; native checks remain separate |
+| `mise run check:full` | Core, CGO-free examples and independent-reference gates; additional native backend profiles/device checks remain separate |
 
 `check:full` includes the live reference test but never the fixture-update task.
 It checks formatting but does not run the mutating `format` task.
@@ -64,28 +81,29 @@ runner prefers Podman and accepts an explicit engine through
 The full gate also runs the [local official-harness adapter](conformance-testing.md),
 with its own pinned Python lockfile, generated audio fixture and artifact directory.
 
-The module archive excludes the Python test environment and nested example
-modules, as well as the generated-log artifact module. E2E execution needs a complete checkout. Unit tests do not require Python,
-a container, multicast or an audio device. Race detection requires a C compiler.
+The root module archive now includes concrete audio backends, but excludes the
+nested selector/example modules, Python environments and generated artifact module.
+Root `go test ./...` does not traverse the optional `audio/native` module; test
+that module separately. E2E execution needs a complete checkout. Unit tests do not
+require Python, a container, multicast or a physical audio device. ALSA native
+software tests can load system libasound with a private discard-only null PCM;
+that is not hardware capture/playback. Race detection requires a C compiler for
+Go's instrumentation, not for production backend code.
 
-For the optional native backend, install PortAudio development files, then run:
+Root audio tests cover bounded queues, cancellation, loading failures, callback
+ABI and clock/lifecycle checks. The selector is tested separately without hardware.
+Linux auto selection prefers usable PipeWire and then ALSA if PipeWire is unusable;
+explicit backend or library-path failure is an error without fallback. Noop is an
+explicit paced discard output, never a fallback or a fabricated input.
 
-```text
-mise run test:native
-```
-
-Callback ring tests exercise wraparound, silence on underflow and cancellation
-without opening hardware. PortAudio sources/tests use the automatic `cgo` tag,
-not a backend-specific tag. Its independent module is not traversed by root tests.
-The Oto backend is part of ordinary root tests; they use fakes and require no audio
-server. `build:example:oto` explicitly disables CGO only for that build, while the
-native tasks explicitly enable it. No global environment or cache setting changes.
-Neither this nor a successful build proves physical output synchronization.
-
-Explicit opt-in native output smoke commands are `validate:audio:oto` and
-`validate:audio:portaudio`. They write silence only and report actual lifecycle
-results separately from device absence, physical measurements and ordinary
-callback tests. See [native/physical validation boundaries](platform-validation.md).
+See [the native audio test contract](native-audio-tests.md) for current commands,
+private PipeWire/null-PCM/software-only scenarios and explicit marker-loopback or
+independent-server device opt-ins. Tests requiring real devices must skip before
+library/server/output/capture operations when the matching explicit ENV is absent;
+those skips do not count as hardware validation. Never run device/mixer-changing
+legacy appliance scripts as part of an ordinary software check. No hardware tests
+have been performed for this migration. Historical silence-only smoke results
+remain historical and cannot validate replacement backends.
 
 ## Lint and formatting
 
@@ -99,19 +117,21 @@ Go does not recursively discover underscore-prefixed directories such as
 and `var`. The independent player module therefore has explicit formatting and
 lint tasks that run in its own directory. There is no custom formatting wrapper.
 
-`lint` only aggregates `lint:go`, `lint:actions`, `lint:backends` and `lint:examples`.
+`lint` aggregates `lint:go`, `lint:actions`, `lint:backends`, `lint:examples` and `lint:audit`.
 `lint:go` has separate formatting, module and tagged-source checks; govet runs
 inside golangci-lint, not through a redundant `go vet` command.
-`lint:examples` aggregates `lint:examples:player`, whose formatting and module
-checks are individually runnable. `format:check` reuses those formatting tasks.
-`format:go`, `format:backends:portaudio` and `format:examples:player` aggregate separate `:code` and
-`:deps` tasks: golangci-lint formats source code, and `go mod tidy` tidies dependencies.
+`lint:examples` explicitly lists independent example tasks; the player formatting
+and module checks are individually runnable. `format:check` reuses the configured
+formatting tasks. Root `format:go` covers concrete audio packages;
+`format:backends:desktop` formats/tidies the separate selector. The player has
+separate `:code` and `:deps` tasks. Go does not discover a newly added `_examples`
+module automatically: validate its own task/module inclusion rather than assuming
+root test or lint coverage. The host-control fake example is `_examples/external-control`.
 
 `lint` checks ordinary and e2e/mdns_e2e/timefilter_reference tagged packages without
-executing them or requiring a LAN/container/audio device. The native example is
-type-checked with PortAudio by `lint:native`; its Oto-only variant is built/tested
-without CGO in the OS CI matrix. PortAudio module files and formatting are checked
-in ordinary `lint` without compiling native code, and tidied by `format`.
+executing them or requiring a LAN/container/audio device. Native example/backend
+lint uses the current purego packages; production examples use native/noop rather
+than the retired backend variants. No audio development headers are needed.
 Dependency resolution during lint is readonly. `.idea`, var and Python
 environments are excluded; user IDE files are not rewritten.
 
@@ -119,7 +139,9 @@ The narrow exceptions document actual contracts: RC1's `user_cancelled` spelling
 cannot be Americanized, and explicitly annotated cleanup error-channel joins must
 not replace the primary cancellation/failure. Other cleanup return values are
 handled or explicitly discarded; correctness linters are not globally disabled.
-CI runs ordinary lint on Linux/Windows/macOS and native lint in its Linux PortAudio job.
+The workflow configures ordinary lint on Linux/Windows/macOS and separate purego
+native/backend checks. Configuration is not execution evidence: the new unpushed
+workflow has not run.
 
 ## E2E boundaries
 
@@ -130,7 +152,9 @@ injected peer faults, and physical synchronization measurements distinct.
 `internal/e2e/server.py` is a thin scenario driver around the **unmodified** Python
 server. Its strict mode rejects legacy/nonconforming client messages. It uses
 real loopback WebSockets, real Noise, real codec encoders, automatic PSK pairing,
-and temporary credentials. No test enables unpaired access to bypass pairing.
+and temporary credentials. Normal paired scenarios use real pairing/trust. Separate
+explicit unpaired-policy scenarios deliberately select Sentinel/unpaired access to
+test rejection and operator approval; they are not a shortcut around the paired flow.
 
 Tests check PCM/FLAC source hashes, the reference encoder's final silence padding,
 Opus negotiation and sample counts (Opus is lossy, not compared to a PCM source
@@ -142,6 +166,22 @@ unpaired bypass, and explicit repair. Fault injection covers malformed envelopes
 known null fields, direction errors, invalid activation and audio without a stream;
 valid unknown extensions are accepted. The renderer uses an
 instrumented fake device. This is not a physical audio-output measurement.
+
+The unreleased [Source extension](source-input.md) uses deterministic fake Inputs
+with the unchanged server's native source role/decoder. It tests PCM16 upstream,
+ADC-time mapping including drift, lifecycle ordering, duplicate/pending starts,
+availability, role loss and reconnect, including explicit unpaired **source**
+approval distinct from playback approval. Source role plus explicit Input is
+required; configuration, activation and reconnect alone never open capture. These
+tests do not measure native ADC timing or route captured input to local Output.
+
+[Host-managed player-control tests](external-player-control.md) exercise fake host
+targets, independent readback, bounded writes, cancellation and unity gain. They
+do not implement/test CEC, ALSA mixer access or HDMI/appliance policy. Non-nil
+PlayerControl, including fixed/no-controls, never pushes stored software values to
+hardware or falls back to software attenuation. Runtime SDK/backend logging uses
+only the base slf4g facade and optional injected logger; provider installation is
+the host's choice, never a capture/control side effect.
 
 The fixture's control HTTP endpoint exists only on loopback in a short-lived test
 process. It is not part of the SDK or an API intended for production deployment.
@@ -210,14 +250,18 @@ cancel before stream/end. The probe does not replace reference packers/queue log
 or claim concurrent-audio/display quality. See [the artwork clause audit](rc1-audit.md#artwork-role)
 for encoded-byte resource limits and optional features not implemented by the SDK.
 
-The clock suite additionally runs frozen reference traces in every normal test
-matrix job, native C++ comparisons in their own Linux/Windows/macOS CI jobs, and
-Linux sanitizer checks. The finite oracle suite does not replace hardware timing
+The clock suite includes frozen reference traces in normal tests. The workflow
+configures native C++ comparisons in Linux/Windows/macOS jobs and Linux sanitizer
+checks. The finite oracle suite does not replace hardware timing
 measurements. NTP integer arithmetic is fuzzed independently against `math/big`.
 
-CI defines Go minimum/pinned-version jobs and reference E2E on Linux, Windows and
-macOS, bounded Linux fuzzing, and an additional native-backend Linux build/test.
-The official-harness adapter has a separate Linux CI job.
+CI defines pinned/stable Go jobs and reference E2E on Linux, Windows and macOS,
+bounded Linux fuzzing, and a separate Linux official-harness job. The new desktop
+backend matrix configures Linux/macOS/Windows on **amd64 and arm64**, with CGO-free
+ABI/software checks and visible skips for non-opted-in device scenarios. It has
+**not run** for this unpushed migration. Local test and cross-build results are
+limited to their exact source, host, target and command; a cross-build is not native
+execution, and earlier artifacts cannot satisfy a changed source fingerprint.
 Managed test tasks record actual machine-readable execution evidence. The final
 CI traceability job collects it even after failures; see [the catalog/report
 workflow and its explicit limits](traceability.md). Run the full gate with
@@ -225,4 +269,5 @@ workflow and its explicit limits](traceability.md). Run the full gate with
 Project-specific outputs live in [the var tree](generated-files.md), the only
 entry in the root `.gitignore`. System temporary paths and shared tool caches
 retain their defaults; ordinary development tasks do not redirect them.
-Only Linux execution has been validated in the local implementation environment.
+Local implementation execution has been on Linux; no native Windows/macOS or
+physical hardware result is claimed for this WIP migration.

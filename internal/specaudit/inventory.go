@@ -149,12 +149,16 @@ func Discover(root string) (Inventory, error) {
 			switch {
 			case strings.HasPrefix(name, "Fuzz"):
 				suite = "fuzz"
-			case moduleRoot == "audio/portaudio":
-				suite = "portaudio"
-			case moduleRoot == "audio/alsa":
+			case directory == "audio/alsa" || strings.HasPrefix(directory, "audio/alsa/"):
 				suite = "alsa"
-			case moduleRoot == "audio/native":
+				if !active() && active("e2e") {
+					suite = "alsa-e2e"
+				}
+			case moduleRoot == "audio/native" || strings.HasPrefix(directory, "audio/internal/") || slices.Contains([]string{"audio/pipewire", "audio/coreaudio", "audio/wasapi"}, directory):
 				suite = "desktop-audio"
+				if !active() && active("e2e") {
+					suite = "desktop-audio-e2e"
+				}
 			case strings.HasPrefix(moduleRoot, "_examples/"):
 				suite = "examples"
 			case active():

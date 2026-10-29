@@ -3,9 +3,11 @@
 A Go SDK for Sendspin players, targeting specification **1.0.0-rc1** at
 [`671a34d`](https://github.com/Sendspin/spec/tree/671a34d408581fc25ea56b3528a4a3f13e3be901).
 Requires **Go 1.27.3+**. The SDK core, including PCM, FLAC and Opus decoding, is
-pure Go. Native audio output is optional.
+pure Go. Native audio input/output is optional and uses purego, without CGO.
 
 **Status:** SDK **v0.1.1**; the API may change before v1. See [release notes](CHANGELOG.md).
+The current development branch adds unreleased native I/O, source and host-control
+APIs and removes the old Oto/PortAudio adapters. Published tags remain unchanged.
 This is not a declaration of complete RC1 conformance.
 Independent server interoperability is tested; physical synchronization has not
 been measured. See [coverage and remaining work](docs/conformance.md).
@@ -24,12 +26,15 @@ process-global provider.
 - Client- and server-initiated WebSockets, with mutually exclusive discovery modes.
 - [Dynamic mDNS publication](docs/dynamic-advertisement.md) preserves live listener restrictions.
 - Noise `KKpsk2`, both RC1 cipher suites, PSK pairing, re-handshakes and unpairing.
-- Persistent identity, pairing records, output delay, volume and mute.
+- Persistent identity, pairing records and output delay; legacy software volume/mute persistence.
 - Player, controller, metadata, artwork, visualizer and color roles; individually enabled.
 - PCM 16/24-bit, FLAC and [gopus](https://github.com/thesyncim/gopus) Opus decoding.
 - Reference time-filter port, bounded playback queue, scheduling and drift correction.
 - Scheduled metadata/colors, multipart artwork and visualizer buffering.
-- Pluggable audio output and codec factories; CGO-free Oto and native PortAudio backends.
+- Pluggable audio I/O and codecs; purego ALSA, PipeWire, WASAPI and CoreAudio,
+  a compile-time platform selector, and an explicitly selected no-hardware noop output.
+- Opt-in [source@v1 capture](docs/source-input.md): backend-neutral `audio.Input`,
+  server-authorized PCM16 upstream, never direct local monitoring (unreleased).
 
 ## Embed
 
@@ -79,27 +84,26 @@ See [SDK usage and audio contracts](docs/usage.md).
 ## Player example
 
 The example is an independent module under [`_examples/player`](_examples/player).
-For a CGO-free Oto build, run `mise run build:example:oto`. The executable is
-written to `var/bin/oto/player` (`player.exe` on Windows):
+Build with `mise run build:example`. Native libraries are loaded only at device
+Open; no native compiler or development headers are needed for the player:
 
 ```text
 player -pairing-token
-player -output oto -allow-approximate -server ws://192.0.2.1:8927/sendspin
+player -output native -server ws://192.0.2.1:8927/sendspin
+player -output alsa -device hw:CARD=S3,DEV=0 -server ws://192.0.2.1:8927/sendspin
 ```
 
-Oto requires explicit best-effort opt-in: its timing is estimated and its flush
-cannot retract downstream audio. It is not a physical RC1 synchronization claim.
-For hardware-clock feedback, install PortAudio headers/libraries and a C compiler,
-then use `mise run build:example:portaudio` and `-output portaudio`. This backend
-requires CGO automatically; there is no custom PortAudio build tag.
+Linux automatic selection prefers usable PipeWire, then direct ALSA. Windows
+uses WASAPI, macOS CoreAudio. Explicit backend/library choices do not silently
+fall back. `-output noop` deliberately discards audio; automatic selection never
+chooses it. No backend selection is a physical synchronization certificate.
 
 Credentials default to the operating system's user-config directory, not the source
 tree. This is an example application, not a production-ready packaged player.
 See [backends and their limitations](docs/usage.md#audio-backend-comparison).
-Development now also includes an optional [direct Linux ALSA module](docs/linux-alsa.md),
-independent of Oto/PortAudio; it is not part of the published v0.1.1 release.
-The optional [native desktop module](docs/native-desktop-audio.md) adds direct
-PipeWire, WASAPI and CoreAudio outputs; it is also unreleased.
+The [direct Linux ALSA package](docs/linux-alsa.md) and other platform backends
+share the SDK module; the optional [native selector](docs/native-desktop-audio.md)
+offers a platform-independent entry point. These APIs are unreleased.
 Development also supports optional [dynamic and static PIN pairing](docs/pin-pairing.md),
 with PSK-only behavior retained by default.
 
@@ -126,7 +130,8 @@ After provisioning, the tests use loopback sockets only, not LAN discovery.
 official harness using this SDK's own local adapter. See
 [scope and evidence](docs/conformance-testing.md); this is not full certification.
 
-Plain `go test ./...` requires neither Python nor PortAudio. See
+Plain `go test ./...` requires no sound card or Python. Live device tests require
+explicit device environment variables and E2E tests additionally use `-tags=e2e`. See
 [development](docs/development.md) and [releasing](docs/releasing.md).
 Normal Go tests also replay frozen C++ time-filter vectors without C++ tooling.
 The full contributor gate compiles the pinned oracle live and therefore additionally
@@ -150,6 +155,13 @@ explicit opt-in and is not part of hardware-free tests.
 The independent [offline loopback tool](_examples/loopback) prepares reference
 WAVs and analyzes supplied recordings without playback, capture or audio-library
 dependencies. Synthetic known-answer results are not physical timing evidence.
+
+## Host-managed volume/mute
+
+Software volume/mute remains the default. Hosts can explicitly select immutable
+unity gain and bind independent external controls, observations and capabilities.
+See [the host-control API and migration guide](docs/external-player-control.md)
+and the fake-only [`_examples/external-control`](./_examples/external-control).
 
 ## License
 

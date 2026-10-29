@@ -184,7 +184,7 @@ main() {
     CGO_ENABLED=0 go -C "$root/_examples/loopback" build -o "$tool" . > "$work/build.log" 2>&1
     "$tool" generate -out "$work/reference.wav" -seconds 3 -amplitude 0.01 > "$work/generate.log" 2>&1
     if [[ "$sdk_output" == 1 ]]; then
-        CGO_ENABLED=1 go -C "$root/audio/alsa" test -c -o "$work/sdk-playback" . > "$work/sdk-build.log" 2>&1
+        CGO_ENABLED=0 go -C "$root/audio/alsa" test -tags=e2e -c -o "$work/sdk-playback" . > "$work/sdk-build.log" 2>&1
         playback_log="$work/sdk-playback.log"
         if [[ "$e2e" == 1 ]]; then
             UV_PROJECT_ENVIRONMENT="$root/var/python/e2e" PYTHONPYCACHEPREFIX="$root/var/python/pycache" \
@@ -248,12 +248,12 @@ main() {
     fi
     if [[ "$e2e" == 1 ]]; then
         printf 'Running bounded independent-server E2E now (about 3 minutes); progress is retained in sdk-e2e.log.\n'
-        SENDSPIN_ALSA_E2E_PLAYBACK=1 SENDSPIN_ALSA_E2E_VIRTUAL='' SENDSPIN_ALSA_E2E_ROOT="$root" \
+        SENDSPIN_ALSA_E2E_PLAYBACK=1 SENDSPIN_ALSA_E2E_VIRTUAL='' SENDSPIN_ALSA_E2E_DEVICE='hw:CARD=S3,DEV=0' SENDSPIN_ALSA_E2E_ROOT="$root" \
             SENDSPIN_ALSA_E2E_ARTIFACT_DIR="$work" SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
             timeout --kill-after=1s 260s "$work/sdk-playback" -test.run '^TestReferenceServerPlaybackScenario$' -test.v -test.timeout=250s > "$playback_log" 2>&1 &
         playback_pid=$!
     elif [[ "$sdk_output" == 1 ]]; then
-        SENDSPIN_ALSA_REFERENCE_PLAYBACK=1 SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
+        SENDSPIN_ALSA_REFERENCE_PLAYBACK=1 SENDSPIN_ALSA_E2E_DEVICE='hw:CARD=S3,DEV=0' SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
             timeout --kill-after=1s 5s "$work/sdk-playback" -test.run '^TestHardwareWeakReferencePlayback$' -test.v -test.timeout=5s > "$playback_log" 2>&1 &
         playback_pid=$!
     else

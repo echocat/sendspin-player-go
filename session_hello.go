@@ -27,8 +27,8 @@ func decodeServerHello(data []byte) (serverHello, error) {
 			}
 		}
 	}
-	// The core declares an object when this known field is present. Source's
-	// role-specific internals are opaque because this SDK never offers source.
+	// The core declares an object when this known field is present. Non-source
+	// clients keep its internals opaque; sourceHello validates them when offered.
 	if hello.SourceSupport != nil && !protocol.Object(hello.SourceSupport) {
 		return serverHello{}, protocol.ErrProtocol
 	}

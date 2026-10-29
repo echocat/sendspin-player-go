@@ -17,8 +17,9 @@ import (
 
 var outgoingPayloadFields = map[string]string{
 	"client/init": "client_id version suite", "noise/handshake": "data",
-	"client/hello": "name device_info supported_roles player@v1_support visualizer@v1_support supported_pair_methods unpaired_access",
-	"client/state": "available player artwork visualizer", "client/time": "client_transmitted",
+	"client/hello": "name device_info supported_roles player@v1_support visualizer@v1_support source@v1_support supported_pair_methods unpaired_access",
+	"client/state": "available player artwork visualizer source", "client/time": "client_transmitted",
+	"client-stream/start": "source", "client-stream/end": "",
 	"client/command": "controller", "client/leave": "", "client/goodbye": "reason",
 	"client/pair-init": "pairing_index commit_B", "client/pair-finalize": "long_term_psk wrapped_psk", "pair/abort": "reason",
 	"client/pair-pending": "pairing_index message", "client/pair-auth": "pake_msg_2", "client/pair-confirm": "client_kc wrapped_nonce_B", "client/pair-retry": "",
@@ -58,6 +59,9 @@ func checkOutgoingPayload(kind string, raw json.RawMessage) error {
 	}
 	formatFields := "codec sample_rate channels bit_depth"
 	if kind == "client/hello" {
+		if _, err = check(p, "source@v1_support", ""); err != nil {
+			return err
+		}
 		if _, err = check(p, "device_info", "product_name manufacturer software_version mac_address"); err != nil {
 			return err
 		}
@@ -95,6 +99,9 @@ func checkOutgoingPayload(kind string, raw json.RawMessage) error {
 		}
 	}
 	if kind == "client/state" {
+		if _, err = check(p, "source", ""); err != nil {
+			return err
+		}
 		if player, err := check(p, "player", "volume muted output_delay_ms required_lead_time_ms min_buffer_ms supported_commands format"); err != nil {
 			return err
 		} else if player != nil {
@@ -125,6 +132,11 @@ func checkOutgoingPayload(kind string, raw json.RawMessage) error {
 	}
 	if kind == "client/command" {
 		if _, err = check(p, "controller", "command volume mute position_ms offset_ms"); err != nil {
+			return err
+		}
+	}
+	if kind == "client-stream/start" {
+		if _, err = check(p, "source", formatFields); err != nil {
 			return err
 		}
 	}

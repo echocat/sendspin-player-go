@@ -5474,11 +5474,15 @@
       ],
       "implementation": [
         "audio/output.go",
-        "audio/portaudio/output.go",
+        "audio/internal/render/device.go",
+        "audio/alsa/output.go",
+        "audio/pipewire/native.go",
+        "audio/wasapi/native.go",
+        "audio/coreaudio/native.go",
         "internal/playback/engine.go"
       ],
       "evidence": [],
-      "notes": "Device.Next specifies port timing and PortAudio supplies native timing, but actual latency compensation is unmeasured. Approximate Oto timing is explicitly not physical evidence."
+      "notes": "Device.Next specifies port timing and the purego native backends account for reported native clocks/queues. Actual latency compensation remains physically unmeasured; replacing the removed Oto/PortAudio adapters does not promote this hardware assessment."
     },
     {
       "id": "P13.05",
@@ -22135,7 +22139,7 @@
       ],
       "implementation": [],
       "evidence": [],
-      "notes": "Unimplemented source role does not create a client capture duty."
+      "notes": "This server-side duty remains outside the client SDK's frozen default profile. Opt-in source-client extension tests use the independent server and do not promote this server assessment."
     },
     {
       "id": "M12.01",
@@ -22557,7 +22561,7 @@
       "evidence": [
         "unit:github.com/echocat/sendspin-player-go#TestServerHelloKnownFieldsAreValidatedBeforeReply"
       ],
-      "notes": "The SDK never advertises source; source-version details are outside the pinned nine-document inventory and require no accidental capture implementation."
+      "notes": "The frozen default profile does not advertise source and validates the known outer support object without interpreting source-version internals. Opt-in source negotiation is implemented and tested separately against the same specification pin; it does not promote primary profile fulfillment."
     },
     {
       "id": "M14.01",
@@ -22584,7 +22588,7 @@
       ],
       "implementation": [],
       "evidence": [],
-      "notes": "Declarative capability choice, not an explicit uppercase MAY in this bullet. Source capture is outside this SDK's selected scope; mandatory core messages still apply."
+      "notes": "Declarative capability choice, not an explicit uppercase MAY in this bullet. Source is outside the frozen default profile; the separately enabled source extension is now implemented. Mandatory core messages and the unchanged primary assessments remain separate from extension evidence."
     },
     {
       "id": "M14.02",
@@ -30152,6 +30156,8 @@
   ],
   "source_gaps": [],
   "unmapped_tests": [
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceSourcePCMInputLifecycleAndReconnect","reason":"Explicit opt-in source@v1 extension at the unchanged specification pin. Independent source decoder verifies PCM16, lifecycle/order, timestamps, availability and reconnect with deterministic fake Input; not a promotion of frozen player-only primary assessments or physical ADC evidence. See docs/source-input.md."},
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceSourceRequiresExplicitUnpairedRoleApproval","reason":"Opt-in source@v1 extension: unmodified server requires explicit source-family approval beyond ordinary unpaired playback trust; revocation/reactivation do not authorize capture. Separate from frozen primary assessments; see docs/source-input.md."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferencePINCounterStoreFailuresDoNotRevealCredentials","reason":"Opt-in PIN extension hardening: independent Store-refusal tests before emission and after verified confirmation; no promotion of the frozen default PSK-only primary assessments."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferencePendingPINCancelDoesNotStartAttempt","reason":"Opt-in static PIN extension hardening: cancellation while gesture-gated persists nothing and emits no pair-init/finalize; separate from frozen primary fulfillment and physical UI acceptance."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceStaticPINWindowClosesAfterFiveFailures","reason":"Optional static PIN extension profile: independent five-failure/window/local-unlock test, not a promotion of frozen PSK-baseline source assessments."},

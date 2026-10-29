@@ -1,5 +1,11 @@
 # SDK usage
 
+**Development / unreleased:** `v0.1.1` remains the recommended stable release,
+but does not contain the new Source, PIN, host-managed player-control or purego
+backend APIs described here. The native backend migration is still WIP. Use a
+matching development checkout when evaluating these APIs; historical release
+tags are unchanged, and no new version or successful CI run is implied.
+
 ## Lifecycle and ownership
 
 `Config.Specification` explicitly pins the protocol profile. Empty selects
@@ -90,14 +96,33 @@ Applications choose how to use these informational preferences for their own UI.
 See [the audit's exact language-tag policy](rc1-audit.md#informational-language-tag-policy).
 
 Default roles are player, controller and metadata. Explicitly set `Roles` to enable
-artwork, visualizer and color. Artwork requires 1–4 channel configurations; visualizer
-defaults to loudness and peak at a maximum 30 periodic frames/second.
+artwork, visualizer, color or Source. Artwork requires 1–4 channel configurations;
+visualizer defaults to loudness and peak at a maximum 30 periodic frames/second.
 
 `Snapshot` returns a defensive copy. Metadata and colors take effect at their
 server timestamps using the current filter estimate. Future updates replace the
 one pending update for that role. Removed roles discard state and pending updates.
 `Snapshot.ActiveStreams` lists sorted, unversioned role families (`artwork`,
-`player`, `visualizer`); stream end does not itself deactivate a role.
+`player`, `visualizer`, and opt-in `source`); stream end does not itself deactivate a role.
+
+For an explicitly configured `SourceRole`, `Input` and `SourceFormat` select
+capture sent **to** the server, not external playback takeover. The stream family
+`source` appears in `ActiveStreams` only after `client-stream/start`. Neither
+activation nor availability initializes capture; only a valid server source
+`start` can do so. See [source API, privacy and backend contract](source-input.md).
+
+Source and native Input are separate explicit choices: configure an `audio.Input`
+and include `SourceRole`. Imports, `New`, handshake, availability, reconnection
+and role activation alone never call `Input.Open`. Capture requires an active,
+available, synchronized source and a new authorized server start; stop,
+unavailability, role loss and disconnect clear authorization. Unpaired source
+access requires explicit server approval, not approval implied by player use;
+`AllowUnpaired` remains false by default. Captured samples never feed local Output.
+Player `available:false` instead reports external playback takeover, not an input.
+
+Optional static/dynamic PIN pairing is also unreleased and explicit through
+`Config.CodePairing`; nil preserves the default PSK-only offer. See
+[PIN pairing](pin-pairing.md) for method selection and host UI/security duties.
 
 `CurrentPosition()` returns the applied metadata's extrapolated position in
 milliseconds. It returns false until the connection is synchronized or when no
@@ -175,11 +200,34 @@ foreign parameters are rejected locally, without sending a command or closing th
 session. Optional state fields are replaced, not merged from a previous snapshot.
 
 Remote player commands remain effective while the player role is active but
-locally unavailable. Successful changes persist before a full client/state echo;
-volume does not clear mute, and delay input is clamped before conversion to machine
+locally unavailable. In the default software-control mode, successful changes
+persist before a full client/state echo; volume does not clear mute, and delay
+input is clamped before conversion to machine
 int. A valid string naming an unoffered player command is ignored, including its
 argument body. This is not an escape from active-role/JSON checks or from strict
 argument validation for volume, mute and set_output_delay.
+
+### Host-managed or fixed player volume/mute (unreleased)
+
+`Config.PlayerControl == nil` retains software gain/mute, its short ramp and
+persisted software values. A non-nil `*PlayerControlConfig`, **even an empty one**,
+selects immutable unity-gain output without software mute/ramping. Without a bound
+target this is a fixed/no-controls player, never a fallback to software control.
+It does not set a hardware volume to 100 or replay stored software settings.
+
+Use `BindPlayerControl` for explicit host setters and initial observations, and
+`ReportPlayerControl` for separate actual readback. Construction, binding, reports,
+activation and reconnect do not invoke hardware setters. Local SetVolume/SetMuted
+success confirms bounded queue acceptance, not hardware state; a successful setter
+also does not establish readback. Retain the binding returned by each report.
+`Snapshot.VolumeKnown`/`MutedKnown` distinguish unknown state from 0/false;
+capabilities and known values control which absolute setters are advertised.
+External observations/requests are not persisted; output-delay persistence remains.
+
+The host owns CEC, mixer adapters and HDMI/appliance policy. No such integration
+is built in or demonstrated by fake-control tests. See
+[the exact external player-control contract](external-player-control.md) for
+generation changes, overload, cancellation, request status and callback ownership.
 
 ## Audio output contract
 
@@ -192,10 +240,10 @@ Implement `audio.Output.Open` and `audio.Device`:
 - `Flush(ctx)` immediately discards queued output and resets its timeline.
 - `Close()` releases resources and stops remaining output.
 
-These are the strict output guarantees. A separately documented best-effort mode
-may relax device-clock and downstream-flush guarantees only with explicit local
-opt-in. The Oto backend below is such a mode, not a conformant substitute for
-hardware-clock feedback. This choice adds no wire capability or negotiation.
+These are the strict output guarantees, not a claim that a replacement backend
+or driver has already demonstrated them physically. Any explicitly documented
+weaker mode must identify its limits; native API timestamps alone do not prove
+DAC accuracy or downstream silence. No wire capability is invented for this.
 
 Only one worker calls a device. Network reception never waits for its write buffer.
 Chunks retain their negotiated format even after an in-place `stream/start`.
@@ -205,8 +253,9 @@ drop/duplicate small whole-frame steps, capped at 0.5% per chunk and by a shared
 750µs absolute-edit budget in every 150ms of the predicted output timeline. The
 budget persists across rate changes and stream resets; opposite corrections do
 not cancel each other. Startup, underrun and errors beyond 1ms use discrete
-resynchronization. Gain changes use a short ramp. Waiting chunks re-read changed
-output delay/gain and the current clock estimate before submission.
+resynchronization. In default software-control mode gain changes use a short ramp;
+non-nil PlayerControl keeps unity gain without software mute/ramping. Waiting
+chunks re-read changed output delay/gain and the current clock estimate before submission.
 
 Timestamp arithmetic does not wrap an extreme past deadline into the future (or
 vice versa). Mappings outside the supported integer range, or a nonfinite/reversed
@@ -235,90 +284,64 @@ independently enforces the same lexical encoding plus STREAMINFO contents.
 automatically calibrated in this implementation. Physical sync, correction
 audibility, and startup artifacts still need hardware/loopback verification.
 
-## Audio backend comparison
+## Audio backend comparison (unreleased migration)
 
-| Backend | Build requirements | Timing | Clear/close limits |
-| --- | --- | --- | --- |
-| `audio/portaudio` | Independent Go module; CGO plus PortAudio headers/library | Native DAC timestamps and stream clock | Native driver behavior; blocking C calls cannot be interrupted by Go context |
-| `audio/oto` | Oto v3.5.1; Windows/macOS/Linux can build without CGO | Explicitly enabled software-queue/latency estimate, no device clock | Clears SDK/player software queues only; downstream audio tail may remain |
-| `audio/alsa` (unreleased) | Independent Linux module; CGO plus libasound headers/library; no Oto/PortAudio | MONOTONIC PCM status and reported delay; non-HW plugins require explicit opt-in | Native drop and conservative reported-tail wait; driver/FIFO accuracy unmeasured |
-| `audio/native` (unreleased) | Independent CGO module; PipeWire on Linux, system WASAPI on Windows, Apple frameworks on macOS | Native graph/endpoint/host clocks and bounded callback queue | Native stop/reset and reported-tail wait; physical downstream behavior unmeasured |
+Concrete backends belong to the **root module** and use purego/system dynamic
+libraries with `CGO_ENABLED=0`; no audio development headers or C compiler are
+required for production builds. OS/architecture implementation files are selected
+at compile time, not by a runtime GOOS switch. Native implementations are WIP,
+targeting Linux/macOS/Windows amd64 and arm64; a cross-build is not native execution.
 
-No backend has a physical +/-1-ms certification. PortAudio is the released
-cross-platform choice when hardware feedback is required; Oto is the convenient
-best-effort choice when its limits are acceptable. The new direct Linux ALSA
-implementation and its separate validation scope are described in
-[Linux ALSA output](linux-alsa.md); it is not included in v0.1.1.
-Direct desktop APIs and their platform-specific build/evidence boundaries are
-documented in [native desktop outputs](native-desktop-audio.md).
+| Package | Platform / runtime dependency | Timing and validation boundary |
+| --- | --- | --- |
+| `audio/alsa` | Linux; dynamically loaded libasound | PCM MONOTONIC status, reported delay, native drop; non-HW plugin timing requires explicit AllowPluginTiming. Physical ADC/DAC/FIFO accuracy remains unmeasured |
+| `audio/pipewire` | Linux; libpipewire and a usable graph | Graph/resampler/queue timing and bounded capture/render queues; a private software graph is not hardware evidence |
+| `audio/wasapi` | Windows; system WASAPI/COM APIs | Endpoint audio clock/QPC correlation and explicit capture/render direction; native execution and physical output/input still need validation |
+| `audio/coreaudio` | macOS; system audio frameworks | AUHAL host timestamps; device rate must already match. Native execution and physical output/input still need validation |
+| `audio/noop` | No audio service or device | Explicit paced discard Output only; no capture, hardware clock, physical silence or synchronization evidence |
+| `audio/native` | Optional **separate selector module**, using the root backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
 
-## Native PortAudio backend
+No backend has physical +/-1-ms certification. Oto and PortAudio are removed from
+the current backend surface; their historical release implementations/results do
+not validate these replacements. See [native tests and explicit device opt-ins](native-audio-tests.md),
+[direct ALSA](linux-alsa.md) and [desktop API details](native-desktop-audio.md).
 
-Import `github.com/echocat/sendspin-player-go/audio/portaudio` and use
-`portaudio.Output{}`. Its source and tests use Go's automatic `cgo` constraint.
-Importing it with CGO disabled fails at build time; no custom tag is necessary.
-The independent module boundary keeps ordinary root `go test -race ./...` free
-of native development-header requirements. Importing the SDK core does not load it.
+### Selection and library failures
 
-- Linux: a C compiler, `pkg-config` and PortAudio development package (Fedora:
-  `portaudio-devel`; Debian/Ubuntu: `portaudio19-dev`).
-- macOS: Xcode command-line tools and PortAudio, for example through Homebrew.
-- Windows: a compatible C toolchain, PortAudio library/headers, and a working
-  `portaudio-2.0.pc`/`PKG_CONFIG_PATH` configuration. A matching runtime DLL must be
-  deployable. This setup has not been exercised locally.
+The optional selector exposes `native.Output` and `native.Input` with `Backend`,
+`Device` and `SharedLibPath`. Linux auto selection prefers usable PipeWire, then
+tries ALSA when PipeWire is unusable. Windows selects WASAPI; macOS selects
+CoreAudio. Explicit backend selection does **not** fall back to another backend.
+An explicit library path must load exactly that library: a missing file or symbol
+is an error, not permission to try the default library or another backend. Linux
+auto with an explicit library path likewise does not fall back to ALSA.
 
-The backend uses callback DAC timestamps and PortAudio's stream clock, not sleeps
-as a substitute for a hardware clock. Its application ring buffer is bounded. A
-driver that supplies no usable DAC timing is rejected. Driver calls such as open,
-abort and close can still block in native code; a context cannot interrupt those
-C calls. Validate the driver and configured latency on each supported platform.
+`noop.Output{}` or `native.BackendNoop` is an explicit no-device choice, never an
+automatic rescue for native failure. Noop has no Input. Constructing/configuring
+a native backend is inert; runtime libraries/services and device permissions are
+needed only when it is opened. A Source Input is opened solely by its authorized
+server-start lifecycle, not by selecting an output or enabling a monitor implicitly.
 
-## CGO-free Oto backend
+### Input contract and safety
 
-```go
-import "github.com/echocat/sendspin-player-go/audio/oto"
+`audio.Input.Open(ctx, format)` returns an `audio.InputDevice`; its
+`Read(ctx, dst)` returns a **sample count** (a channel multiple) and the best-effort
+ADC time of the first sample in the local Go monotonic time domain. `dst` is
+borrowed only until return. Backends bound capture queues and report discontinuity
+through `audio.InputDiscontinuityError`; cancellation must return promptly before
+the owning worker closes the device. Read arrival is not a substitute for ADC time.
 
-// Explicitly accept estimated timing and downstream audio tails.
-output := oto.Output{AllowApproximate: true}
-```
+These APIs do not change global audio defaults, input gains, mixers, monitoring
+routes or hardware volume. PipeWire/WASAPI monitor capture is a separate explicit
+loopback choice, not an automatically selected microphone. Source/native-input
+fake tests establish neither physical capture timing nor acoustic/electrical safety.
+See [Source API](source-input.md) and [native test opt-ins](native-audio-tests.md)
+before opening any input or running a marker/physical-loopback test.
 
-The zero value refuses to open with `ErrApproximateOnly`, before creating a native
-context. This avoids silently presenting an estimate as DAC-clock feedback.
-`Next` adds the bounded SDK ring, Oto's player buffer and
-`EstimatedDeviceLatency` to the current monotonic time. The latency is a calibration
-hint (default: the requested device buffer, 40 ms), not measured feedback; hardware
-drift, underruns, audio-server buffering and scheduling can invalidate it. Reducing
-the configured buffer does not establish a tighter timing-error bound.
-
-`Flush` pauses and stops source reads, seeks the live source to clear both software
-queues, then resumes. `Close` stops those reads and clears the software queues.
-Neither can retract already mixed/submitted audio from the OS/server/device.
-Consequently clears, stops, disconnects and server handoffs may have an audible
-tail or overlap; strict output-stop guarantees do not apply in this opt-in mode.
-
-Additional limitations:
-
-- One retained Oto context per process, one active SDK output device at a time.
-  `ErrInUse` rejects concurrent devices. Another library creating its own Oto
-  context can prevent this backend from initializing.
-- Sample rate, mono/stereo channel count and requested device-buffer duration
-  remain fixed after first initialization. Reopen with the same configuration is
-  supported; a change returns `ErrContextFormat`. Advertise one rate/channel layout
-  across all codecs. The example uses 48-kHz stereo throughout.
-- A failed Oto context cannot be replaced in-process. Waiting for asynchronous
-  initialization can be cancelled, but a native/library initialization call itself
-  is not interruptible. Close releases the SDK lease, not Oto's process resources.
-- Windows, macOS and Linux builds need no C compiler for this backend. Runtime
-  audio services/frameworks are still required. Linux uses PulseAudio (including
-  compatible PipeWire servers), with a dynamically loaded `libasound.so.2` fallback.
-- Unit tests use fake device/player interfaces and open no hardware. A local
-  Linux/WSLg smoke test uses silence only; Windows/macOS runtime and physical output
-  measurements remain outstanding.
-
-The shipped backend uses **unmodified upstream Oto**. The experimental same-stream
-PulseAudio timing/flush extension described in [the feasibility report](oto-feasibility.md)
-is not shipped as a fork or enabled implicitly. Accurate timing, full lifecycle
-semantics and corresponding Windows/macOS APIs would be separate future work.
+The new amd64/arm64 Linux/macOS/Windows CI matrix is configured but **has not run**
+for this unpushed migration. Local tests/cross-builds, skipped device tests and
+historical artifacts must not be reported as its successful execution. No hardware
+tests have been performed for this migration.
 
 ## Credentials
 
@@ -334,6 +357,10 @@ overwrites a record. Formatting secrets is redacted; explicit serialization is
 confidential and remains the application's responsibility.
 
 ## Optional diagnostics
+
+Runtime SDK/backends use only the base slf4g facade and optionally injected
+loggers. The host selects any provider; imports, capture and host-control binding
+do not install one. Samples, credentials and raw backend errors are not normal log fields.
 
 `Config.Observe` accepts a `diagnostic.Observer`. It sees successful sends and
 authenticated receives at the complete-WebSocket-message boundary (plus explicitly

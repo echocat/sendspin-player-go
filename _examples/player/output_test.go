@@ -1,28 +1,24 @@
 package main
 
 import (
+	"github.com/echocat/sendspin-player-go/audio/native"
 	"testing"
-
-	"github.com/echocat/sendspin-player-go/audio/oto"
 )
 
 func TestOutputSelectionDoesNotInitializeAudio(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		output, err := newOutput("oto", allow)
+	for _, name := range []string{"native", "pipewire", "alsa", "wasapi", "coreaudio", "noop"} {
+		o, err := newOutput(name, "selected-device", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		selected, ok := output.(oto.Output)
-		if !ok || selected.AllowApproximate != allow {
-			t.Fatal("selection lost explicit best-effort choice")
+		selected, ok := o.(native.Output)
+		if !ok || selected.Device != "selected-device" {
+			t.Fatal("selection lost device")
 		}
 	}
-	if _, err := newOutput("unknown", false); err == nil {
-		t.Fatal("accepted unknown output")
-	}
-	_, nativeErr := newPortaudioOutput()
-	output, err := newOutput("portaudio", false)
-	if (nativeErr == nil) != (err == nil) || (err == nil && output == nil) {
-		t.Fatal("native selection did not follow CGO availability", err)
+	for _, name := range []string{"unknown", "oto", "portaudio"} {
+		if _, err := newOutput(name, "", ""); err == nil {
+			t.Fatal("unsupported output accepted", name)
+		}
 	}
 }
