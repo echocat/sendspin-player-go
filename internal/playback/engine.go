@@ -223,7 +223,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			cancel()
 			continue
 		}
-		err := e.render(work, device, chunk, &gain)
+		err := e.renderRecovering(work, device, chunk, &gain)
 		interrupted := work.Err() != nil
 		cancel()
 		if err != nil && !(interrupted && errors.Is(err, context.Canceled)) {
@@ -233,6 +233,32 @@ func (e *Engine) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (e *Engine) renderRecovering(ctx context.Context, device audio.Device, c Chunk, gain *float32) error {
+	var err error
+	for range 4 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		previous := *gain
+		err = e.render(ctx, device, c, gain)
+		var reset audio.TimelineResetError
+		if !errors.As(err, &reset) {
+			return err
+		}
+		if reset.AudioTimelineReset() {
+			if flushErr := device.Flush(ctx); flushErr != nil {
+				return flushErr
+			}
+			*gain = 0
+		} else {
+			*gain = previous
+		}
+		// Remap from the original source timestamp. render discards stale frames;
+		// never replay a partial submission or change production retry/backoff.
+	}
+	return err
 }
 
 func (e *Engine) render(ctx context.Context, device audio.Device, c Chunk, gain *float32) error {

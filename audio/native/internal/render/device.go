@@ -16,12 +16,20 @@ import (
 )
 
 var (
-	ErrUnavailable = errors.New("native audio: backend unavailable on this platform/build")
-	ErrTiming      = errors.New("native audio: missing, stale or invalid native timing")
-	ErrClockReset  = errors.New("native audio: underrun changed the reserved output timeline")
-	ErrDriver      = errors.New("native audio: driver disconnected or invalidated the stream")
-	ErrClosed      = errors.New("native audio: device closed")
+	ErrUnavailable       = errors.New("native audio: backend unavailable on this platform/build")
+	ErrTiming            = errors.New("native audio: missing, stale or invalid native timing")
+	ErrClockReset  error = clockResetError{}
+	ErrDriver            = errors.New("native audio: driver disconnected or invalidated the stream")
+	ErrClosed            = errors.New("native audio: device closed")
 )
+
+type clockResetError struct{ flush bool }
+
+func (clockResetError) Error() string {
+	return "native audio: underrun changed the reserved output timeline"
+}
+func (e clockResetError) AudioTimelineReset() bool { return e.flush }
+func (clockResetError) Is(target error) bool       { _, ok := target.(clockResetError); return ok }
 
 // Driver methods are serialized by Device; Clock must be a pure native clock
 // read, safe in a render callback. Stop quiesces callbacks/discards native queues;
@@ -333,6 +341,7 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 	}
 	d.mu.Unlock()
 	var health *time.Ticker
+	accepted := false
 	defer func() {
 		if health != nil {
 			health.Stop()
@@ -356,7 +365,7 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 		if epoch != d.epoch {
 			d.diagnostics.Resets++
 			d.mu.Unlock()
-			return ErrClockReset
+			return clockResetError{flush: accepted}
 		}
 		n := min(len(samples), len(d.ring)-d.size, 4096/d.format.Channels*d.format.Channels)
 		tail := (d.head + d.size) % len(d.ring)
@@ -364,6 +373,7 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 			d.ring[(tail+i)%len(d.ring)] = max(-1, min(1, value))
 		}
 		d.size += n
+		accepted = accepted || n > 0
 		full := d.size == len(d.ring)
 		d.mu.Unlock()
 		samples = samples[n:]

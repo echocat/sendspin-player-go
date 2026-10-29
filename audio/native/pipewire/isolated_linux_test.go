@@ -136,6 +136,10 @@ context.objects = [
 				return err
 			}
 			reschedules++
+			var reset interface{ AudioTimelineReset() bool }
+			if errors.As(err, &reset) && !reset.AudioTimelineReset() {
+				continue
+			}
 			if err = d.Flush(ctx); err != nil {
 				return err
 			}
