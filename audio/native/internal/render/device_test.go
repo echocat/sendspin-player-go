@@ -126,7 +126,7 @@ func TestConsecutiveWritesKeepTheReservationUntilNextOrFlush(t *testing.T) {
 	}
 }
 func TestTimingFaultsNeverReleaseMedia(t *testing.T) {
-	for _, name := range []string{"zero", "too-far", "too-old", "no-clock", "slow", "backwards", "invalid-frame"} {
+	for _, name := range []string{"zero", "too-far", "too-old", "no-clock", "slow", "backwards", "invalid-frame", "undersized-queue"} {
 		t.Run(name, func(t *testing.T) {
 			f := &fakeDriver{}
 			d := openFake(t, f)
@@ -165,6 +165,9 @@ func TestTimingFaultsNeverReleaseMedia(t *testing.T) {
 			out := make([]float32, 96)
 			if name == "invalid-frame" {
 				out = make([]float32, 3)
+			}
+			if name == "undersized-queue" {
+				out = make([]float32, len(d.ring)+2)
 			}
 			d.Process(out, first)
 			if !slices.Equal(out, make([]float32, len(out))) {

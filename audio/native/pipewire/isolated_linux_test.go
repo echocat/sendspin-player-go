@@ -109,7 +109,12 @@ context.objects = [
 	t.Cleanup(func() { _ = daemon.Process.Kill(); _ = daemon.Wait() })
 	for {
 		if _, err = os.Stat(filepath.Join(runtime, "sendspin-test")); err == nil {
-			break
+			// Socket creation precedes completion of the server's module/object
+			// initialization. Probe the private protocol and sink, not just stat.
+			probe := exec.CommandContext(ctx, "pw-link", "-i")
+			if data, probeErr := probe.Output(); probeErr == nil && strings.Contains(string(data), "sendspin-null:") {
+				break
+			}
 		}
 		select {
 		case <-ctx.Done():

@@ -29,3 +29,7 @@ func probeWA(submitted uint64, rate uint32, position, frequency, qpc, previous u
 func probeCA(host uint64, latency uint32, rate float64) int64 {
 	return int64(C.sendspin_native_ca_time(C.uint64_t(host), C.uint32_t(latency), C.double(rate)))
 }
+
+func probePWFrames(requested uint64, matched uint32, duration uint64, num, denom, rate, capacity uint32) uint32 {
+	return uint32(C.sendspin_native_pw_frames(C.uint64_t(requested), C.uint32_t(matched), C.uint64_t(duration), C.uint32_t(num), C.uint32_t(denom), C.uint32_t(rate), C.uint32_t(capacity)))
+}

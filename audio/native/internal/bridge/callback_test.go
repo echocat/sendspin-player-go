@@ -80,3 +80,23 @@ func TestNativeTimingTransformsAndRejectedDomains(t *testing.T) {
 		}
 	}
 }
+
+func TestPipeWireDemandUsesQuantumNotBufferAllocation(t *testing.T) {
+	if got := probePWFrames(0, 0, 1024, 1, 48000, 48000, 8192); got != 1024 {
+		t.Fatal("allocation size mistaken for native quantum", got)
+	}
+	if got := probePWFrames(128, 0, 1024, 1, 48000, 48000, 8192); got != 128 {
+		t.Fatal(got)
+	}
+	if got := probePWFrames(0, 941, 1024, 1, 48000, 44100, 8192); got != 941 {
+		t.Fatal("rate-matched demand lost", got)
+	}
+	if got := probePWFrames(256, 0, 0, 0, 0, 48000, 128); got != 128 {
+		t.Fatal("native capacity exceeded", got)
+	}
+	for _, got := range []uint32{probePWFrames(0, 0, 0, 1, 48000, 48000, 8192), probePWFrames(0, 0, 1024, 1, 48000, 44100, 8192), probePWFrames(0, 0, math.MaxUint64, math.MaxUint32, 48000, 48000, 8192), probePWFrames(0, 0, 1024, 1, 0, 48000, 8192)} {
+		if got != 0 {
+			t.Fatal("missing/fractional/overflowing demand fabricated", got)
+		}
+	}
+}

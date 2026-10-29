@@ -125,7 +125,7 @@ func (d *Device) Process(out []float32, first int64) {
 	if !d.running || d.fault != nil {
 		return
 	}
-	if len(out) == 0 || len(out) > d.MaxSamples() || len(out)%d.format.Channels != 0 {
+	if len(out) == 0 || len(out) > d.MaxSamples() || len(out) > len(d.ring) || len(out)%d.format.Channels != 0 {
 		d.failLocked(ErrDriver)
 		return
 	}

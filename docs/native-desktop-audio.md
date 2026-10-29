@@ -39,6 +39,9 @@ All outputs accept:
   backend-specific, not interchangeable with ALSA `hw:` names.
 - `BufferDuration`: SDK queue capacity, default 100ms, allowed 10..500ms. This is
   not measured hardware latency and does not reconfigure the global device buffer.
+  It must fit a native render block; an undersized queue fails rather than
+  producing inevitable repeated underruns. Increase it for unusually large
+  driver/graph quanta.
 - `StartupTimeout`: default 2s, allowed 10ms..10s, waiting for genuine native
   timing after starting playback. An initial missing timestamp emits zeros only.
 - `MaxTimingWindow`: default 2ms, allowed (0,50ms], bounding the native/Go clock
@@ -68,6 +71,10 @@ Pi installations without PipeWire should use the separate [direct ALSA output](l
 The server may resample or route streams according to its existing policy. The
 backend accounts for stream resampler buffering instead of treating graph ticks
 and application frames as the same unit.
+Native render demand comes from `pw_buffer.requested`, SPA RateMatch, or an exact
+conversion of SPA Position's graph duration (for older equal-rate streams).
+Allocation capacity is never mistaken for the processing quantum; missing or
+fractional demand without rate-matching metadata is rejected, not guessed.
 
 Recent PipeWire pkg-config files include `-fno-strict-overflow`, which Go's CGO
 flag allowlist rejects. Set **only for the command**

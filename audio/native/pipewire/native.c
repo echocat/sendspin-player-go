@@ -4,6 +4,8 @@
 #include "../internal/bridge/bridge.h"
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
+#include <spa/node/io.h>
+#include <stddef.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +18,8 @@ struct sendspin_pw {
     enum pw_stream_state state;
     uintptr_t token;
     int rate, channels;
+    const struct spa_io_position *position;
+    const struct spa_io_rate_match *rate_match;
 };
 static pthread_once_t initialize = PTHREAD_ONCE_INIT;
 static void init_library(void) { pw_init(NULL, NULL); }
@@ -26,6 +30,11 @@ static void state_changed(void *data, enum pw_stream_state old, enum pw_stream_s
     p->state = state;
     pw_thread_loop_signal(p->loop, false);
     if (state == PW_STREAM_STATE_ERROR || (state == PW_STREAM_STATE_UNCONNECTED && old != PW_STREAM_STATE_UNCONNECTED)) sendspinNativeFail(p->token);
+}
+static void io_changed(void *data, uint32_t id, void *area, uint32_t size) {
+    sendspin_pw *p = data;
+    if (id == SPA_IO_Position) p->position = size >= offsetof(struct spa_io_position, clock) + offsetof(struct spa_io_clock, duration) + sizeof(uint64_t) ? area : NULL;
+    if (id == SPA_IO_RateMatch) p->rate_match = size >= offsetof(struct spa_io_rate_match, size) + sizeof(uint32_t) ? area : NULL;
 }
 
 static void process(void *data) {
@@ -40,8 +49,9 @@ static void process(void *data) {
     }
     struct spa_data *d = &b->datas[0];
     uint32_t stride = (uint32_t)p->channels * sizeof(float);
-    uint32_t frames = d->maxsize / stride;
-    if (buffer->requested > 0 && buffer->requested < frames) frames = (uint32_t)buffer->requested;
+    uint32_t frames = sendspin_native_pw_frames(buffer->requested, p->rate_match ? p->rate_match->size : 0,
+        p->position ? p->position->clock.duration : 0, p->position ? p->position->clock.rate.num : 0,
+        p->position ? p->position->clock.rate.denom : 0, p->rate, d->maxsize / stride);
     if (!frames || frames > (uint32_t)p->rate / 2) {
         d->chunk->size = 0; buffer->size = 0;
         sendspinNativeFail(p->token);
@@ -61,7 +71,7 @@ static void process(void *data) {
 }
 
 static const struct pw_stream_events events = {
-    PW_VERSION_STREAM_EVENTS, .state_changed = state_changed, .process = process
+    PW_VERSION_STREAM_EVENTS, .state_changed = state_changed, .io_changed = io_changed, .process = process
 };
 
 void sendspin_pw_close(sendspin_pw *p) {
