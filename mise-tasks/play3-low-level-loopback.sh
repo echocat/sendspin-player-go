@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deliberately NOT a mise/CI task: explicit local consent and a terminal required.
+# Explicit live opt-in only; never a default/CI dependency.
 set -euo pipefail
 umask 077
 export LC_ALL=C
@@ -41,6 +41,7 @@ capture_pid=''
 playback_pid=''
 changed=0
 restored=0
+connected_leave_muted=0
 finish() {
     local status=$? cleanup_failed=0
     # Signals can arrive inside a function redirected to a log. Do not hide the
@@ -58,25 +59,33 @@ finish() {
     if [[ "$changed" == 1 ]]; then
         mixer sset Speaker playback mute >> "$work/cleanup.log" 2>&1 || cleanup_failed=1
         mixer sset Mic playback mute >> "$work/cleanup.log" 2>&1 || cleanup_failed=1
-        printf '\nAudio processes stopped. Disconnect BOTH cable ends before restoration.\n' >&2
-        if ask 'When physically disconnected, type ABGEZOGEN (otherwise settings stay muted).' ABGEZOGEN; then
-            if mixer info > "$work/card-before-restore.txt" 2>&1 &&
-                grep -q 'USB041e:324d' "$work/card-before-restore.txt" &&
-                timeout --kill-after=1s 5s alsactl --no-lock --no-init-fallback --pedantic --file "$work/mixer-before.state" restore S3 >> "$work/cleanup.log" 2>&1 &&
-                mixer scontents > "$work/mixer-restored.txt" 2>&1 &&
-                cmp -s "$work/mixer-before.txt" "$work/mixer-restored.txt"; then
-                restored=1
-                printf 'Saved S3 mixer settings restored; simple-mixer readback matches.\n' >&2
-            else
+        if [[ "$connected_leave_muted" == 1 ]]; then
+            printf '\nAudio processes stopped. Connected mode: test levels retained, Speaker and Mic monitor left muted; no restore while wired.\n' >&2
+            if ! check_switch "$(mixer sget Speaker)" Playback off || ! check_switch "$(mixer sget Mic)" Playback off; then
                 cleanup_failed=1
-                # A partial restore may have enabled switches: mute again.
-                mixer sset Speaker playback mute >> "$work/cleanup.log" 2>&1 || true
-                mixer sset Mic playback mute >> "$work/cleanup.log" 2>&1 || true
-                printf 'RESTORE FAILED. Outputs muted again where possible.\n' >&2
+                printf 'ERROR: final mute could not be verified.\n' >&2
             fi
         else
-            cleanup_failed=1
-            printf 'NOT RESTORED: no disconnect confirmation received.\n' >&2
+            printf '\nAudio processes stopped. Disconnect BOTH cable ends before restoration.\n' >&2
+            if ask 'When physically disconnected, type ABGEZOGEN (otherwise settings stay muted).' ABGEZOGEN; then
+                if mixer info > "$work/card-before-restore.txt" 2>&1 &&
+                    grep -q 'USB041e:324d' "$work/card-before-restore.txt" &&
+                    timeout --kill-after=1s 5s alsactl --no-lock --no-init-fallback --pedantic --file "$work/mixer-before.state" restore S3 >> "$work/cleanup.log" 2>&1 &&
+                    mixer scontents > "$work/mixer-restored.txt" 2>&1 &&
+                    cmp -s "$work/mixer-before.txt" "$work/mixer-restored.txt"; then
+                    restored=1
+                    printf 'Saved S3 mixer settings restored; simple-mixer readback matches.\n' >&2
+                else
+                    cleanup_failed=1
+                    # A partial restore may have enabled switches: mute again.
+                    mixer sset Speaker playback mute >> "$work/cleanup.log" 2>&1 || true
+                    mixer sset Mic playback mute >> "$work/cleanup.log" 2>&1 || true
+                    printf 'RESTORE FAILED. Outputs muted again where possible.\n' >&2
+                fi
+            else
+                cleanup_failed=1
+                printf 'NOT RESTORED: no disconnect confirmation received.\n' >&2
+            fi
         fi
         if [[ "$restored" != 1 ]]; then
             printf 'After physically disconnecting, restore manually:\n' >&2
@@ -92,8 +101,8 @@ finish() {
 
 main() {
     local capture_db=0 capture_min_db=-999 sdk_output=0 option
-    if [[ $# -lt 1 || $# -gt 3 || "$1" != --acknowledge-unverified-wiring ]]; then
-        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output]'
+    if [[ $# -lt 1 || $# -gt 4 || "$1" != --acknowledge-unverified-wiring ]]; then
+        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output] [--connected-leave-muted]'
         return 2
     fi
     shift
@@ -105,15 +114,25 @@ main() {
             --sdk-output)
                 [[ "$sdk_output" == 0 ]] || { fail 'Duplicate SDK option.'; return 2; }
                 sdk_output=1 ;;
+            --connected-leave-muted)
+                [[ "$connected_leave_muted" == 0 ]] || { fail 'Duplicate connected option.'; return 2; }
+                connected_leave_muted=1 ;;
             *) fail 'Unsupported option; no automatic gain escalation or device fallback.'; return 2 ;;
         esac
     done
     if [[ "$sdk_output" == 1 && "$capture_db" != 24 ]]; then
         fail 'SDK comparison requires the already inspected --capture-gain-24db profile.'; return 2
     fi
+    if [[ "$connected_leave_muted" == 1 && "$sdk_output" != 1 ]]; then
+        fail 'Connected mode requires the explicit SDK comparison profile.'; return 2
+    fi
     [[ "$(uname -s)" == Linux ]] || { fail 'Linux/WSL only.'; return 2; }
-    [[ -t 0 && -t 1 ]] || { fail 'An interactive terminal is required; no piped confirmations.'; return 2; }
-    exec {terminal_fd}<> /dev/tty
+    if [[ "$connected_leave_muted" == 1 ]]; then
+        exec {terminal_fd}>&2
+    else
+        [[ -t 0 && -t 1 ]] || { fail 'An interactive terminal is required; no piped confirmations.'; return 2; }
+        exec {terminal_fd}<> /dev/tty
+    fi
     for tool in amixer alsactl arecord timeout awk mktemp go grep sleep mkdir cmp cat; do command -v "$tool" >/dev/null || return 2; done
     if [[ "$sdk_output" == 0 ]]; then command -v aplay >/dev/null || return 2; fi
     local root tool speaker mic playback_log
@@ -125,17 +144,25 @@ main() {
         'Only an ordinary straight 3.5mm stereo TRS cable (two insulating rings on EACH plug).' \
         'No mono/TRRS cable, splitter, headphones or speakers; no joining L/R outputs.' \
         '3s reference, left only, peak 0.01 (-40dBFS); speaker <= -40dB.' \
-        'Five seconds of private microphone recording. No automatic gain increase/retry.' \
-        'Ctrl-C stops the run, but stay here to disconnect and restore. Do not close this terminal.'
+        'Five seconds of private microphone recording. No automatic gain increase/retry.'
     printf 'Requested capture gain: %sdB; +24dB requires the explicit extra flag and separate consent.\n' "$capture_db"
     printf 'SDK output selected: %s (0=aplay baseline, 1=SDK ALSA Next/Write/Flush/Close).\n' "$sdk_output"
-    ask 'Cable DISCONNECTED, correct cable, risks accepted? Type VORBEREITEN.' VORBEREITEN || return 2
+    if [[ "$connected_leave_muted" == 1 ]]; then
+        printf 'Cable assumed CONNECTED. No prompts. Test levels retained and output/monitor muted on exit.\n'
+    else
+        printf 'Ctrl-C stops the run, but stay here to disconnect and restore. Do not close this terminal.\n'
+        ask 'Cable DISCONNECTED, correct cable, risks accepted? Type VORBEREITEN.' VORBEREITEN || return 2
+    fi
     mkdir -p "$root/var/platform-validation/play3-low-level"
     work="$(mktemp -d "$root/var/platform-validation/play3-low-level/run-XXXXXXXX")"
     trap finish EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
-    printf 'capture_gain_db=%s\nsdk_output=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" "$sdk_output" > "$work/run-settings.txt"
+    printf 'capture_gain_db=%s\nsdk_output=%s\nconnected_leave_muted=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" "$sdk_output" "$connected_leave_muted" > "$work/run-settings.txt"
+
+    if [[ "$connected_leave_muted" == 1 ]]; then
+        check_switch "$(mixer sget Mic)" Playback off || { fail 'Mic monitor is already active; aborting without playback. Disconnect the cable before changing monitoring.'; return 1; }
+    fi
 
     # All compilation/file preparation happens BEFORE changing a mixer/opening audio.
     tool="$work/loopback"
@@ -173,7 +200,9 @@ main() {
     fi
 
     printf '%s\n' "$speaker" "$mic"
-    ask 'Now connect HEADPHONE-OUT to the SEPARATE MIC-IN with the TRS cable. Type VERBUNDEN to run once.' VERBUNDEN || return 2
+    if [[ "$connected_leave_muted" == 0 ]]; then
+        ask 'Now connect HEADPHONE-OUT to the SEPARATE MIC-IN with the TRS cable. Type VERBUNDEN to run once.' VERBUNDEN || return 2
+    fi
     # Recheck after the human wait: another application may have changed the card.
     speaker="$(mixer sget Speaker)"; mic="$(mixer sget Mic)"
     if ! check_levels "$speaker" Playback -40 || ! check_switch "$speaker" Playback off || \
@@ -216,7 +245,7 @@ main() {
         return 1
     fi
     # Analysis is OFFLINE. Failure/inconclusive does not trigger louder replay.
-    local channel result
+    local channel result analysis_failed=0
     for channel in 0 1; do
         result=0
         timeout --kill-after=1s 30s "$tool" analyze -reference "$work/reference.wav" \
@@ -224,8 +253,13 @@ main() {
             -capture-channel "$channel" -source recording -search-ms 2000 \
             -out "$work/analysis-channel$channel.json" > "$work/analysis-channel$channel.log" 2>&1 || result=$?
         printf 'Offline channel %s: exit %s (0=aligned, nonzero=inconclusive/error).\n' "$channel" "$result"
+        if [[ "$result" != 0 ]]; then analysis_failed=1; fi
     done
     printf 'No automatic gain increase. File alignment is NOT absolute latency or server synchronization.\n'
+    if [[ "$connected_leave_muted" == 1 && "$analysis_failed" == 1 ]]; then
+        fail 'SDK loopback marker analysis failed; private reports retained, no replay.'
+        return 1
+    fi
 }
 
 main "$@"

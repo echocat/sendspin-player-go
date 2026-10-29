@@ -1,7 +1,8 @@
 # Explicit PLAY! 3 direct-cable experiment (unverified wiring)
 
-This optional, interactive Linux/WSL script is not a normal mise task and never
-part of CI. By default it is **not an SDK test**: it uses ALSA utilities to check whether a weak
+This optional Linux/WSL script is never a default-test/CI dependency. Its live
+mise task must be invoked explicitly. By default the script is **not an SDK test**:
+it uses ALSA utilities to check whether a weak
 analog reference can traverse an explicitly accepted, **unverified** direct
 headphone-output → microphone-input cable. It does not establish that this
 connection is electrically suitable.
@@ -14,6 +15,33 @@ bias. Neither user consent nor a successful recording proves electrical safety.
 A verified attenuating/DC-isolating connection remains preferable; this script
 exists only for the explicitly requested experiment with the available cable.
 
+## One-command SDK run with cable already connected
+
+Connect the same stereo TRS cable from headphone-out to the separate mic-in,
+close other applications using S3, then run from Nushell:
+
+```nu
+mise run test:alsa:loopback
+```
+
+This explicitly selects SDK output, +24dB capture and `--connected-leave-muted`.
+It assumes the cable is connected, makes **no interactive queries**, and does
+not require a TTY. It aborts if Mic monitoring is initially enabled. Speaker
+stays at the previously used −40dB setting; waveform and five-second capture are
+unchanged. It runs once and exits nonzero if SDK playback or either marker
+analysis fails; no retry or automatic gain escalation.
+
+On normal completion, errors or ordinary signals, the processes stop and Speaker
+and Mic monitoring are muted and checked. **Test levels remain in effect; the
+original mixer state is saved but NOT automatically restored while wired.**
+The exact restore command is printed for optional use after disconnecting.
+The cable can remain connected after the run while the output stays muted.
+This does not establish electrical safety. SIGKILL/device/driver failures retain
+the limitations described below. Results stay under the same private `var` tree.
+
+The interactive alternatives below remain available when automatic restoration
+after confirmed cable disconnection is preferred.
+
 ## Preconditions and command (Nushell)
 
 - Only the previously inspected PLAY! 3, card ID `S3`, PCM `hw:CARD=S3,DEV=0`.
@@ -24,7 +52,8 @@ exists only for the explicitly requested experiment with the available cable.
   another process changing hardware mixer controls during playback.
 - Explicit acceptance of unresolved electrical risk, temporary mixer changes,
   a weak test signal and five seconds of private microphone recording.
-- ALSA utilities, GNU `timeout`, Bash, Go via mise; an interactive terminal.
+- ALSA utilities, GNU `timeout`, Bash, Go via mise; an interactive terminal for
+  the confirmation-based alternatives only.
   No sudo, global configuration, default device changes or background services.
 
 From the repository root:
@@ -99,7 +128,8 @@ network-clock, drift-correction or calibrated synchronization acceptance test.
 
 ## Disconnect before restoration
 
-On success, failure or ordinary Ctrl-C/TERM/HUP, the script stops and waits for
+In the interactive variants, on success, failure or ordinary Ctrl-C/TERM/HUP,
+the script stops and waits for
 the audio processes, mutes Speaker and Mic playback where possible and asks you
 to **physically disconnect both cable ends**. Only `ABGEZOGEN` authorizes restoring
 the saved card state. Do not close the terminal: signal handling cannot survive
@@ -146,3 +176,6 @@ audio and Go commands replaced by fakes. They cover consent, readback, a partial
 setup failure, capture/playback/xrun failures, ordinary Ctrl-C, disconnect-before-
 restore ordering, failed/missing restoration and SDK-versus-aplay selection.
 They never touch host audio.
+Connected-mode tests additionally run without a terminal or any input and verify
+no prompts/restoration, final muting, early active-monitor rejection and failure
+exit status for inconclusive analysis.

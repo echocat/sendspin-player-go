@@ -39,8 +39,9 @@ elif tool == "loopback":
         path.write_bytes(b"SYNTHETIC ONLY")
         pathlib.Path(str(path) + ".json").write_text('{}')
     else:
-        pathlib.Path(args[args.index("-out") + 1]).write_text('{"status":"fake-inconclusive"}')
-        sys.exit(1)
+        aligned = os.environ.get("FAKE_CONNECTED") == "1" and fault != "analysis"
+        pathlib.Path(args[args.index("-out") + 1]).write_text(json.dumps({"status":"fake-aligned" if aligned else "fake-inconclusive"}))
+        sys.exit(0 if aligned else 1)
 elif tool == "alsactl":
     path = pathlib.Path(args[args.index("--file") + 1])
     if "store" in args:
@@ -99,7 +100,7 @@ else: raise AssertionError("unexpected fake " + tool)
 
 @unittest.skipUnless(sys.platform == "linux", "Linux Bash/PTY harness only")
 class SmokeHarnessTest(unittest.TestCase):
-    def run_harness(self, fault="", cancel=False, confirm_disconnect=True, acknowledge=True, capture_24db=False, extra_args=()):
+    def run_harness(self, fault="", cancel=False, confirm_disconnect=True, acknowledge=True, capture_24db=False, extra_args=(), connected=False, terminal=True):
         # The entire script/repo/var/tool environment is temporary, not the real repo.
         preferred_tmp = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
         with tempfile.TemporaryDirectory(prefix="play3-fakes-", dir=preferred_tmp) as tmp:
@@ -117,21 +118,37 @@ class SmokeHarnessTest(unittest.TestCase):
             before = {
                 "Speakerplaybackgain": -20, "Speakerplaybackswitch": "on",
                 # Start with an enabled monitor to test disconnect-before-restore.
-                "Micplaybackgain": 16, "Micplaybackswitch": "on",
+                "Micplaybackgain": 16, "Micplaybackswitch": "off" if connected and fault != "monitor-active" else "on",
                 "Miccapturegain": 24, "Miccaptureswitch": "on",
             }
             (root / "state.json").write_text(json.dumps(before))
-            pid, fd = pty.fork()
+            write_fd = None
+            if terminal:
+                pid, fd = pty.fork()
+            else:
+                fd, write_fd = os.pipe()
+                pid = os.fork()
             if pid == 0:
+                if not terminal:
+                    os.close(fd)
+                    null = os.open(os.devnull, os.O_RDONLY)
+                    os.dup2(null, 0)
+                    os.close(null)
+                    os.dup2(write_fd, 1)
+                    os.dup2(write_fd, 2)
+                    os.close(write_fd)
                 os.environ.update(FAKE_ROOT=str(root), FAKE_FAULT=fault,
+                                  FAKE_CONNECTED="1" if connected else "0",
                                   PATH=str(tools) + os.pathsep + os.environ["PATH"])
                 args = ["bash"]
                 if os.environ.get("PLAY3_FAKE_TRACE") == "1": args.append("-x")
                 args.append(str(script))
                 if acknowledge: args.append("--acknowledge-unverified-wiring")
                 if capture_24db: args.append("--capture-gain-24db")
+                if connected: args.append("--connected-leave-muted")
                 args.extend(extra_args)
                 os.execvp("bash", args)
+            if write_fd is not None: os.close(write_fd)
             output = b""
             answered = set()
             cancel_sent = False
@@ -153,6 +170,7 @@ class SmokeHarnessTest(unittest.TestCase):
                         (b"otherwise settings stay muted).", b"ABGEZOGEN\n" if confirm_disconnect else b"NEIN\n"),
                     ]:
                         if prompt in output and prompt not in answered:
+                            self.assertTrue(terminal, "unexpected prompt without a terminal")
                             if prompt.startswith(b"Type VERBUNDEN") and cancel is True:
                                 answer = b"\x03"
                             if prompt.startswith(b"otherwise"):
@@ -241,6 +259,40 @@ class SmokeHarnessTest(unittest.TestCase):
         self.assertEqual(state, before)
         self.assertFalse(any(e[0] == "aplay" for e in events))
         self.assertTrue(any(e[0] == "arecord" and e[1] == "stopped" for e in events))
+
+    def test_connected_mode_has_no_prompts_or_tty_and_leaves_muted(self):
+        code, output, events, state, _ = self.run_harness(capture_24db=True, extra_args=("--sdk-output",), connected=True, terminal=False)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(state["Speakerplaybackswitch"], "off")
+        self.assertEqual(state["Micplaybackswitch"], "off")
+        self.assertEqual(state["Speakerplaybackgain"], -40)
+        self.assertEqual(state["Miccapturegain"], 24)
+        self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
+        self.assertEqual(sum(e[0] == "sdk-playback" and e[1] == "start" for e in events), 1)
+        for prompt in ["VORBEREITEN", "VERBUNDEN", "ABGEZOGEN"]: self.assertNotIn(prompt, output)
+
+    def test_connected_failures_exit_without_prompt_and_leave_muted(self):
+        for fault in ["play", "analysis", "capture-too-high"]:
+            with self.subTest(fault=fault):
+                code, output, events, state, _ = self.run_harness(fault=fault, capture_24db=True, extra_args=("--sdk-output",), connected=True, terminal=False)
+                self.assertNotEqual(code, 0, output)
+                self.assertEqual(state["Speakerplaybackswitch"], "off")
+                self.assertEqual(state["Micplaybackswitch"], "off")
+                self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
+
+    def test_connected_active_monitor_aborts_without_changes_or_audio(self):
+        code, output, events, state, before = self.run_harness(fault="monitor-active", capture_24db=True, extra_args=("--sdk-output",), connected=True, terminal=False)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(state, before)
+        self.assertFalse(any(e[0] in ["arecord", "aplay", "sdk-playback"] for e in events))
+        self.assertFalse(any(e[0] == "amixer" and "sset" in e[2] for e in events))
+
+    def test_connected_ctrl_c_stops_capture_and_leaves_muted(self):
+        code, output, events, state, _ = self.run_harness(cancel="recording", capture_24db=True, extra_args=("--sdk-output",), connected=True)
+        self.assertEqual(code, 130, output)
+        self.assertEqual(state["Speakerplaybackswitch"], "off")
+        self.assertEqual(state["Micplaybackswitch"], "off")
+        self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
 
     def test_opt_in_flag_is_required_before_any_tool_access(self):
         code, _, events, state, before = self.run_harness(acknowledge=False)

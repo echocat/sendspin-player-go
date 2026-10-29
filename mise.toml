@@ -209,6 +209,10 @@ run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
 description = "Record Linux ALSA native null-PCM and fake-device evidence, without opening hardware"
 run = "go run ./internal/specauditcmd run --suite alsa"
 
+[tasks."test:alsa:loopback"]
+description = "LIVE PLAY! 3 SDK loopback: cable already connected, five-second capture, no prompts, leaves output muted"
+run = 'bash "{{config_root}}/mise-tasks/play3-low-level-loopback.sh" --acknowledge-unverified-wiring --capture-gain-24db --sdk-output --connected-leave-muted'
+
 [tasks."test:alsa:stub"]
 description = "Test ALSA fake devices and unavailable-native-platform behavior without CGO"
 dir = "audio/alsa"
