@@ -51,6 +51,8 @@ There is deliberately **no play/capture/auto-level command**.
   physical accuracy guarantee. Competing distinct peaks are marked ambiguous.
 - An affine fit reports **relative file-origin offset**, observed capture-to-
   reference sample-coordinate ratio in ppm, residuals and five-marker windows.
+  Marker centers are fitted in both files so stretching a finite marker does
+  not get mistaken for an additional origin offset.
   Positive ppm means marker spacing occupies more capture samples than reference
   samples, not necessarily that a particular hardware output is faster/slower.
 - Missing/ambiguous markers, full-scale digital samples, changing polarity,

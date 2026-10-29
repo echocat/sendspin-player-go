@@ -51,6 +51,7 @@ func TestAffineAlignmentRecoversKnownFractionalOffsetAndRelativeClock(t *testing
 	}{
 		{"integer", 1234, 0, 1, 0, 0},
 		{"fractional-fast", 1234.25, 250, .35, .0003, .01},
+		{"larger-clock-stretch", 2424.5, 750, .7, 0, 0},
 		{"negative-offset-inverted", -200.4, -180, -.6, .0002, -.02},
 	} {
 		t.Run(test.name, func(t *testing.T) {

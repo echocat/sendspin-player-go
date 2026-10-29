@@ -35,8 +35,8 @@ func defaultOptions() options {
 
 type detection struct {
 	ID             int     `json:"marker_id"`
-	ReferenceFrame int     `json:"reference_frame"`
-	CaptureFrame   float64 `json:"capture_frame"`
+	ReferenceFrame float64 `json:"reference_marker_center_frame"`
+	CaptureFrame   float64 `json:"capture_marker_center_frame"`
 	Correlation    float64 `json:"correlation"`
 	RunnerUp       float64 `json:"distinct_runner_up_absolute_correlation"`
 	Status         string  `json:"status"`
@@ -118,15 +118,16 @@ func analyze(ctx context.Context, m manifest, reference, capture wave, o options
 	var matched []detection
 	budget := int64(maxProducts)
 	for _, p := range m.Markers {
+		center := float64(p.Frames-1) / 2
 		prediction := float64(p.Start)
 		radius := o.SearchMS * float64(m.Rate) / 1000
 		if len(matched) > 0 {
-			prediction += matched[0].CaptureFrame - float64(matched[0].ReferenceFrame)
+			prediction += matched[0].CaptureFrame - matched[0].ReferenceFrame
 			radius = o.TrackMS * float64(m.Rate) / 1000
 		}
 		if len(matched) >= 2 {
 			f := fitMarkers(matched, m.Rate)
-			prediction = float64(p.Start)*(1+f.RelativePPM/1e6) + f.FileOffsetFrames
+			prediction = (float64(p.Start)+center)*(1+f.RelativePPM/1e6) + f.FileOffsetFrames - center
 		}
 		low := max(0, int(math.Floor(prediction-radius)))
 		high := min(len(capture.Samples)-p.Frames, int(math.Ceil(prediction+radius)))
@@ -135,7 +136,10 @@ func analyze(ctx context.Context, m manifest, reference, capture wave, o options
 		if err != nil {
 			return fail(err)
 		}
-		d := detection{ID: p.ID, ReferenceFrame: p.Start, CaptureFrame: at, Correlation: score, RunnerUp: runner, Status: "not_found"}
+		// Correlation under a clock stretch aligns the marker's interior, not
+		// its leading edge. Fit matching centers in both coordinate systems so
+		// relative rate does not bias the extrapolated file-origin offset.
+		d := detection{ID: p.ID, ReferenceFrame: float64(p.Start) + center, CaptureFrame: at + center, Correlation: score, RunnerUp: runner, Status: "not_found"}
 		if math.Abs(score) >= o.MinCorrelation {
 			d.Status = "matched"
 			if math.Abs(score)-runner < o.MinSeparation {
