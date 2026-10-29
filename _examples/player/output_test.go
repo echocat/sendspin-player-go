@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/echocat/sendspin-player-go/audio/native"
 	"testing"
+
+	"github.com/echocat/sendspin-player-go/audio/native"
 )
 
 func TestOutputSelectionDoesNotInitializeAudio(t *testing.T) {

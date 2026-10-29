@@ -4,6 +4,7 @@ package native
 
 import (
 	"context"
+
 	"github.com/echocat/sendspin-player-go/audio"
 )
 

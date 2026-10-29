@@ -3,10 +3,9 @@
 import asyncio
 import struct
 import wave
-from pathlib import Path
-
 from aiohttp import web
 from aiosendspin.server.audio import AudioFormat
+from pathlib import Path
 
 
 class WeakPlayback:

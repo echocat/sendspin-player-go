@@ -5,8 +5,9 @@ package alsa
 import (
 	"context"
 	"errors"
-	"github.com/echocat/sendspin-player-go/audio"
 	"testing"
+
+	"github.com/echocat/sendspin-player-go/audio"
 )
 
 func TestUnavailableNativeBackend(t *testing.T) {

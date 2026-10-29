@@ -3,9 +3,10 @@
 package alsa
 
 import (
+	"testing"
+
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/audio/internal/audiotest"
-	"testing"
 )
 
 func TestReferenceServerPlaybackScenario(t *testing.T) {

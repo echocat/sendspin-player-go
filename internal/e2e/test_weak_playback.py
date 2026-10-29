@@ -1,11 +1,11 @@
 """Weak-producer regression tests: no sockets or audio hardware."""
 
 import asyncio
-from pathlib import Path
 import struct
 import tempfile
 import unittest
 import wave
+from pathlib import Path
 
 from weak_playback import WeakPlayback
 

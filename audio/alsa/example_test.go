@@ -2,6 +2,7 @@ package alsa_test
 
 import (
 	"fmt"
+
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/audio/alsa"
 )

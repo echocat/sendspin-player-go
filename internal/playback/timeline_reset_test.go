@@ -3,9 +3,10 @@ package playback
 import (
 	"context"
 	"errors"
-	"github.com/echocat/sendspin-player-go/audio"
 	"testing"
 	"time"
+
+	"github.com/echocat/sendspin-player-go/audio"
 )
 
 type resetSignal struct{ flush bool }

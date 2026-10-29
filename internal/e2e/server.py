@@ -11,7 +11,6 @@ import hashlib
 import json
 import logging
 import struct
-
 from aiohttp import web
 from aiosendspin.models.types import ConnectionReason, PairMethod, PairingCodeFormat
 from aiosendspin.noise.keys import Identity, b64url_decode, psk_id_for
@@ -28,11 +27,12 @@ from aiosendspin.server.server import (
     ClientDisconnectedEvent,
     SendspinServer,
 )
-from media import MediaControls
+
 from mdns import MDNSPeer
+from media import MediaControls
 from pairing_observer import PairingObserver
-from weak_playback import WeakPlayback
 from source_controls import SourceControls
+from weak_playback import WeakPlayback
 
 
 class ControlledStore(InMemoryServerPairingStore):

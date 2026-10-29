@@ -4,23 +4,21 @@ No upstream files are modified and no result is published. This is a separate
 implementation entry, never an alias for upstream's unrelated sendspin-go.
 """
 
+import aiosendspin
 import argparse
 import asyncio
+import av
 import dataclasses
 import importlib.metadata
 import json
+import numpy as np
 import os
 import secrets
 import socket
-from pathlib import Path
-
-import aiosendspin
-import av
-import numpy as np
-
 from conformance import runner
 from conformance.implementations import IMPLEMENTATIONS
 from conformance.models import ImplementationSpec, RoleSpec
+from pathlib import Path
 
 HARNESS_REVISION = "fa6dc45795f0810c5810af9f9b828595b7267ece"
 SPEC_REVISION = "671a34d408581fc25ea56b3528a4a3f13e3be901"

@@ -6,16 +6,15 @@ credential is used. --write is explicit; the default checks frozen bytes.
 
 import argparse
 import copy
+import cpace
 import hashlib
 import importlib.metadata
 import json
-from pathlib import Path
-
-import cpace
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PrivateKey,
     X25519PublicKey,
 )
+from pathlib import Path
 
 VERSION = "0.1.0"
 MODULE_SHA256 = "ee207059c29923d1b0aad50ab3b252a475e44424e130849cef85b86f7755bbd9"

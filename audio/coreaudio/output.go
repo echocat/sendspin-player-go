@@ -10,10 +10,11 @@ package coreaudio
 
 import (
 	"context"
+	"time"
+
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/audio/internal/render"
 	log "github.com/echocat/slf4g"
-	"time"
 )
 
 type Output struct {

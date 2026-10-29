@@ -6,7 +6,6 @@ No host audio configuration, audio device or microphone is accessed.
 
 import json
 import os
-from pathlib import Path
 import pty
 import select
 import shutil
@@ -15,7 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
-
+from pathlib import Path
 
 FAKE = r'''
 import json, os, pathlib, shutil, signal, sys, time
