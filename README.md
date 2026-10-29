@@ -147,6 +147,9 @@ Additional hardware-free work is documented in the [transport/load campaign](doc
 The silence-only output probe is a separate `_examples/audio-probe` module,
 not a command nested inside the player; invoking live output still requires an
 explicit opt-in and is not part of hardware-free tests.
+The independent [offline loopback tool](_examples/loopback) prepares reference
+WAVs and analyzes supplied recordings without playback, capture or audio-library
+dependencies. Synthetic known-answer results are not physical timing evidence.
 
 ## License
 

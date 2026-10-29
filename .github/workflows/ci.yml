@@ -40,6 +40,11 @@ jobs:
       - run: go mod tidy -diff
       - name: Record CGO-free example tests
         run: go run ./internal/specauditcmd run --suite examples
+      - name: Build offline WAV analysis tool without CGO or audio libraries
+        working-directory: _examples/loopback
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o ../../var/bin/loopback/ .
       - name: Test the ALSA unavailable-platform stub without CGO or hardware
         working-directory: audio/alsa
         env:

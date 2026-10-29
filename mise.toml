@@ -31,7 +31,39 @@ run = "go mod tidy"
 
 [tasks."format:examples"]
 description = "Format and tidy all independent example modules"
-depends = ["format:examples:player", "format:examples:audio-probe"]
+depends = ["format:examples:player", "format:examples:audio-probe", "format:examples:loopback"]
+
+[tasks."format:examples:loopback"]
+description = "Format/tidy the dependency-free offline WAV measurement example"
+dir = "_examples/loopback"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
+
+[tasks."lint:examples:loopback"]
+description = "Check the offline tool without native libraries or device access"
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...', 'golangci-lint run --config "{{config_root}}/.golangci.yaml"']
+
+[tasks."test:loopback"]
+description = "Offline WAV/analysis tests against known synthetic offsets/relative clock ratios"
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = "go test -count=1 ./..."
+
+[tasks."test:loopback:artifacts"]
+description = "Retain a synthetic WAV/reference/report/truth fixture under var; no hardware or recording"
+depends = ["prepare"]
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+env.SENDSPIN_LOOPBACK_ARTIFACT_DIR = "{{config_root}}/var/loopback"
+run = "go test -count=1 -v -run '^TestOfflineCLIEndToEndAndNoOverwrite$' ."
+
+[tasks."build:loopback"]
+description = "Build the standalone offline tool without CGO, Oto, PortAudio or SDK runtime imports"
+depends = ["prepare"]
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = 'go build -o "{{config_root}}/var/bin/loopback/" .'
 
 [tasks."format:backends"]
 description = "Format independent audio backend modules"
@@ -75,7 +107,7 @@ run = "go mod tidy"
 
 [tasks."format:check"]
 description = "Check golangci-lint formatting without changing files"
-depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:backends:alsa", "lint:backends:desktop", "lint:examples:player:format", "lint:examples:audio-probe"]
+depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:backends:alsa", "lint:backends:desktop", "lint:examples:player:format", "lint:examples:audio-probe", "lint:examples:loopback"]
 
 [tasks."format:examples:audio-probe"]
 description = "Format and tidy the standalone output validation example"
@@ -123,7 +155,7 @@ run = "actionlint -shellcheck="
 
 [tasks."lint:examples"]
 description = "Check all independent examples without requiring native headers"
-depends = ["lint:examples:player", "lint:examples:audio-probe"]
+depends = ["lint:examples:player", "lint:examples:audio-probe", "lint:examples:loopback"]
 
 [tasks."lint:backends"]
 description = "Check independent backend formatting and module files"

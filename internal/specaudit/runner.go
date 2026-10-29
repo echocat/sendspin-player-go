@@ -80,6 +80,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		return goTest(".", "-race", "-tags=timefilter_reference", "-timeout=2m", "./internal/timesync"), nil
 	case "examples":
 		calls := append(goTest("_examples/player", "./..."), goTest("_examples/audio-probe", "./...")...)
+		calls = append(calls, goTest("_examples/loopback", "./...")...)
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0"}
 		}
@@ -349,7 +350,7 @@ func suiteScope(suite string) string {
 	case "desktop-audio":
 		return "Host direct PipeWire/WASAPI/CoreAudio build, C clock/callback ABI and fake queue/lifecycle tests; no audio device or server connection, capture or physical measurement"
 	case "examples":
-		return "CGO-free example selection tests; no audio device"
+		return "CGO-free example selection and offline synthetic WAV analysis tests; no audio device, capture or physical measurement"
 	}
 	return ""
 }
