@@ -390,6 +390,10 @@ run = "go run ./internal/specauditcmd verify-spec"
 description = "Verify fixed independent Cacophony Noise vectors against their pinned source"
 run = "go run ./internal/noisevectorcmd"
 
+[tasks."audit:verify-cpace"]
+description = "Recompute frozen TEST transcripts with the pinned independent Python CPace source, then compare Go; no network protocol or hardware"
+run = ['uv run --locked --project internal/e2e python internal/e2e/cpace_oracle.py', "go test -race -count=1 -run '^TestPinnedPythonDifferentialCorpus$' ./internal/cpace"]
+
 [tasks."audit:verify-mdns"]
 description = "Verify pinned mDNS source files and exact scoped import transformations"
 run = "go run ./internal/mdnsimportcmd"
@@ -400,7 +404,7 @@ run = "go run ./internal/specauditcmd report --profile full --require-conformanc
 
 [tasks."audit:check-evidence"]
 description = "Require fresh complete core evidence, without claiming complete conformance"
-depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise", "audit:verify-mdns"]
+depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise", "audit:verify-cpace", "audit:verify-mdns"]
 run = "go run ./internal/specauditcmd report --profile full"
 
 [tasks.vuln]

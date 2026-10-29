@@ -43,3 +43,19 @@ display replacement/hiding, downgrade handling of credential files, physical
 timing and independent cryptographic review remain product/review duties.
 The optional PIN profile's source-inventory acceptance remains separate from
 the default PSK-only audit. Test success does not certify these open duties.
+
+## Independent differential extension
+
+`mise run audit:verify-cpace` recomputes 172 frozen TEST transcripts using the
+pinned Python cpace 0.1.0 source, then compares the Go primitive. It covers exact
+Sendspin profiles, draft length/padding/clamping boundaries, altered contexts,
+PINs/roles/shares and MCF acceptance/rejection. Source, corpus fingerprints and
+reproduction instructions are in `internal/cpace/testdata/README.md`.
+
+The reflected-tuple cases reproduced a missing generic MCF reflection check:
+equal public shares and equal associated data could make a primitive's own tag
+look like its peer's. The guard is now retained in the primitive as well as
+being implicitly excluded by Sendspin's distinct fixed `server`/`client` labels.
+This is a defense-in-depth correction to the private primitive, **not a claim
+that the current fixed-label Sendspin PIN flow was remotely exploitable**.
+No PAKE construction, wire profile, runtime randomness or public API was changed.

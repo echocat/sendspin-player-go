@@ -123,7 +123,11 @@ func (r *Result) Verify(tag []byte) bool {
 		return false
 	}
 	r.finished = true
-	r.verified = len(tag) == 64 && hmac.Equal(tag, r.tag(true))
+	// Explicit MCF must not accept our own tag as the peer's proof when both
+	// public shares/AD tuples coincide. Sendspin's distinct fixed role labels
+	// already prevent that tuple; retain the draft's guard in the primitive too.
+	reflection := hmac.Equal(r.ya, r.yb) && hmac.Equal(r.ada, r.adb)
+	r.verified = !reflection && len(tag) == 64 && hmac.Equal(tag, r.tag(true))
 	if !r.verified {
 		r.Close()
 	}

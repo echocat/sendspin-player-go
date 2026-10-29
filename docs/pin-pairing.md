@@ -103,6 +103,9 @@ protocol/crypto implementation, with operator code entry controlled over private
 loopback. Both PIN methods and both cipher suites interoperate, including dynamic
 retry, the persistent twenty-round limit, the static five-failure window and
 local unlocking. PINs and raw PAKE bodies are not retained in fixture events.
+An additional 172-case frozen differential corpus independently compares
+generators, shared keys, ISKs, MCF tags and acceptance decisions. The verifier
+checks the pinned oracle source and refuses to silently regenerate fixtures.
 
 These tests are **not an independent cryptographic security review**. They do
 not certify physical display behavior, human gestures, side-channel resilience
