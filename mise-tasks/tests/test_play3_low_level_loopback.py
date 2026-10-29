@@ -70,6 +70,8 @@ elif tool == "amixer":
                 key = name + direction.lower()
                 gain = state[key + "gain"]
                 if fault == "readback" and name == "Speaker": gain = -20
+                if direction == "Capture" and fault == "capture-too-high": gain = 25
+                if direction == "Capture" and fault == "capture-not-applied": gain = 0
                 text += f" {direction} 24 [50%] [{gain:.2f}dB] [{state[key + 'switch']}]"
             print(text)
     elif args[0] == "info": print("SYNTHETIC card / USB041e:324d" if fault != "identity" else "SYNTHETIC other card")
@@ -93,7 +95,7 @@ else: raise AssertionError("unexpected fake " + tool)
 
 @unittest.skipUnless(sys.platform == "linux", "Linux Bash/PTY harness only")
 class SmokeHarnessTest(unittest.TestCase):
-    def run_harness(self, fault="", cancel=False, confirm_disconnect=True, acknowledge=True):
+    def run_harness(self, fault="", cancel=False, confirm_disconnect=True, acknowledge=True, capture_24db=False, extra_args=()):
         # The entire script/repo/var/tool environment is temporary, not the real repo.
         preferred_tmp = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
         with tempfile.TemporaryDirectory(prefix="play3-fakes-", dir=preferred_tmp) as tmp:
@@ -123,6 +125,8 @@ class SmokeHarnessTest(unittest.TestCase):
                 if os.environ.get("PLAY3_FAKE_TRACE") == "1": args.append("-x")
                 args.append(str(script))
                 if acknowledge: args.append("--acknowledge-unverified-wiring")
+                if capture_24db: args.append("--capture-gain-24db")
+                args.extend(extra_args)
                 os.execvp("bash", args)
             output = b""
             answered = set()
@@ -182,6 +186,39 @@ class SmokeHarnessTest(unittest.TestCase):
         self.assertIn("No automatic gain increase", output)
         self.assertEqual(sum(e[0] == "aplay" and e[1] == "start" for e in events), 1)
         self.assertEqual(sum(e[0] == "arecord" and e[1] == "start" for e in events), 1)
+        self.assertTrue(any(e[0] == "amixer" and e[2][-3:] == ["Mic", "capture", "0dB"] for e in events))
+        self.assertFalse(any(e[0] == "amixer" and e[2][-3:] == ["Mic", "capture", "24dB"] for e in events))
+
+    def test_explicit_24db_mode_keeps_output_and_duration_unchanged(self):
+        code, output, events, state, before = self.run_harness(capture_24db=True)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(state, before)
+        self.assertIn("Requested capture gain: 24dB", output)
+        self.assertTrue(any(e[0] == "amixer" and e[2][-3:] == ["Mic", "capture", "24dB"] for e in events))
+        self.assertEqual([e[2][-1] for e in events if e[0] == "amixer" and e[2][-3:-1] == ["Speaker", "playback"] and e[2][-1].endswith("dB")], ["-40dB"])
+        generate = next(e[2] for e in events if e[0] == "loopback" and e[2][0] == "generate")
+        self.assertEqual(generate[generate.index("-amplitude") + 1], "0.01")
+        self.assertEqual(generate[generate.index("-seconds") + 1], "3")
+        record = [e[2] for e in events if e[0] == "arecord" and e[1] == "start"]
+        self.assertEqual(len(record), 1)
+        self.assertEqual(record[0][record[0].index("--duration") + 1], "5")
+        self.assertEqual(sum(e[0] == "aplay" and e[1] == "start" for e in events), 1)
+
+    def test_24db_mode_requires_exact_capture_readback_and_restores_on_abort(self):
+        for fault in ["capture-too-high", "capture-not-applied"]:
+            with self.subTest(fault=fault):
+                code, output, events, state, before = self.run_harness(fault=fault, capture_24db=True)
+                self.assertNotEqual(code, 0, output)
+                self.assertEqual(state, before)
+                self.assertFalse(any(e[0] in ["arecord", "aplay"] for e in events))
+
+    def test_arbitrary_gain_options_fail_before_tool_access(self):
+        for args in [("--capture-gain-48db",), ("--capture-gain-24db", "--capture-gain-24db")]:
+            with self.subTest(args=args):
+                code, _, events, state, before = self.run_harness(extra_args=args)
+                self.assertNotEqual(code, 0)
+                self.assertFalse(events)
+                self.assertEqual(state, before)
 
     def test_opt_in_flag_is_required_before_any_tool_access(self):
         code, _, events, state, before = self.run_harness(acknowledge=False)
@@ -213,12 +250,14 @@ class SmokeHarnessTest(unittest.TestCase):
         self.assertFalse(any(e[0] == "alsactl" and "restore" in e[2] for e in events))
 
     def test_ctrl_c_during_capture_reaps_before_restoring(self):
-        code, output, events, state, before = self.run_harness(cancel="recording")
-        self.assertEqual(code, 130, output)
-        self.assertEqual(state, before)
-        stopped = next(i for i, e in enumerate(events) if e[0] == "arecord" and e[1] == "stopped")
-        restored = next(i for i, e in enumerate(events) if e[0] == "alsactl" and "restore" in e[2])
-        self.assertLess(stopped, restored)
+        for capture_24db in [False, True]:
+            with self.subTest(capture_24db=capture_24db):
+                code, output, events, state, before = self.run_harness(cancel="recording", capture_24db=capture_24db)
+                self.assertEqual(code, 130, output)
+                self.assertEqual(state, before)
+                stopped = next(i for i, e in enumerate(events) if e[0] == "arecord" and e[1] == "stopped")
+                restored = next(i for i, e in enumerate(events) if e[0] == "alsactl" and "restore" in e[2])
+                self.assertLess(stopped, restored)
 
     def test_partial_restore_failure_mutes_again(self):
         code, output, _, state, _ = self.run_harness(fault="restore")

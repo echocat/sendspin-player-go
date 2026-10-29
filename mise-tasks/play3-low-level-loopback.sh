@@ -16,11 +16,11 @@ mixer() { timeout --kill-after=1s 3s amixer --card S3 -- "$@"; }
 # Require both reported channels and their dB readings, not just command success.
 # Percentages/raw mixer values do not establish analog voltage.
 check_levels() {
-    local text=$1 kind=$2 maximum=$3 line gain count=0
+    local text=$1 kind=$2 maximum=$3 minimum=${4:--999} line gain count=0
     while IFS= read -r line; do
         if [[ "$line" =~ $kind\ [0-9]+\ \[[0-9]+%\]\ \[(-?[0-9]+(\.[0-9]+)?)dB\]\ \[(on|off)\] ]]; then
             gain=${BASH_REMATCH[1]}
-            awk -v gain="$gain" -v maximum="$maximum" 'BEGIN { exit !(gain <= maximum) }' || return 1
+            awk -v gain="$gain" -v maximum="$maximum" -v minimum="$minimum" 'BEGIN { exit !(gain <= maximum && gain >= minimum) }' || return 1
             count=$((count + 1))
         fi
     done <<< "$text"
@@ -91,9 +91,15 @@ finish() {
 }
 
 main() {
-    if [[ $# != 1 || "$1" != --acknowledge-unverified-wiring ]]; then
-        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring'
+    local capture_db=0 capture_min_db=-999
+    if [[ $# -lt 1 || $# -gt 2 || "$1" != --acknowledge-unverified-wiring ]]; then
+        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db]'
         return 2
+    fi
+    if [[ $# == 2 ]]; then
+        [[ "$2" == --capture-gain-24db ]] || { fail 'Only the separately consented --capture-gain-24db mode is supported.'; return 2; }
+        capture_db=24
+        capture_min_db=24
     fi
     [[ "$(uname -s)" == Linux ]] || { fail 'Linux/WSL only.'; return 2; }
     [[ -t 0 && -t 1 ]] || { fail 'An interactive terminal is required; no piped confirmations.'; return 2; }
@@ -107,15 +113,17 @@ main() {
         'Low levels/muting do NOT remove microphone DC bias or prove electrical safety.' \
         'Only an ordinary straight 3.5mm stereo TRS cable (two insulating rings on EACH plug).' \
         'No mono/TRRS cable, splitter, headphones or speakers; no joining L/R outputs.' \
-        '3s reference, left only, peak 0.01 (-40dBFS); speaker <= -40dB; capture <= 0dB.' \
+        '3s reference, left only, peak 0.01 (-40dBFS); speaker <= -40dB.' \
         'Five seconds of private microphone recording. No automatic gain increase/retry.' \
         'Ctrl-C stops the run, but stay here to disconnect and restore. Do not close this terminal.'
+    printf 'Requested capture gain: %sdB; +24dB requires the explicit extra flag and separate consent.\n' "$capture_db"
     ask 'Cable DISCONNECTED, correct cable, risks accepted? Type VORBEREITEN.' VORBEREITEN || return 2
     mkdir -p "$root/var/platform-validation/play3-low-level"
     work="$(mktemp -d "$root/var/platform-validation/play3-low-level/run-XXXXXXXX")"
     trap finish EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
+    printf 'capture_gain_db=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" > "$work/run-settings.txt"
 
     # All compilation/file preparation happens BEFORE changing a mixer/opening audio.
     tool="$work/loopback"
@@ -133,7 +141,7 @@ main() {
         mixer sset Speaker playback mute
         mixer sset Mic playback mute
         mixer sset Speaker playback -40dB
-        mixer sset Mic capture 0dB
+        mixer sset Mic capture "${capture_db}dB"
         mixer sset Mic capture cap
     } > "$work/setup.log" 2>&1
     speaker="$(mixer sget Speaker)"
@@ -142,7 +150,7 @@ main() {
     if ! check_levels "$speaker" Playback -40 || ! check_switch "$speaker" Playback off; then
         fail 'Speaker level/mute readback failed.'; return 1
     fi
-    if ! check_levels "$mic" Capture 0 || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
+    if ! check_levels "$mic" Capture "$capture_db" "$capture_min_db" || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
         fail 'Capture/monitor readback failed.'; return 1
     fi
 
@@ -151,7 +159,7 @@ main() {
     # Recheck after the human wait: another application may have changed the card.
     speaker="$(mixer sget Speaker)"; mic="$(mixer sget Mic)"
     if ! check_levels "$speaker" Playback -40 || ! check_switch "$speaker" Playback off || \
-        ! check_levels "$mic" Capture 0 || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
+        ! check_levels "$mic" Capture "$capture_db" "$capture_min_db" || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
         fail 'Mixer changed while waiting; aborting.'; return 1
     fi
 
@@ -166,7 +174,7 @@ main() {
     mixer sset Speaker playback unmute >> "$work/setup.log" 2>&1
     speaker="$(mixer sget Speaker)"; mic="$(mixer sget Mic)"
     if ! check_levels "$speaker" Playback -40 || ! check_switch "$speaker" Playback on || \
-        ! check_levels "$mic" Capture 0 || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
+        ! check_levels "$mic" Capture "$capture_db" "$capture_min_db" || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
         fail 'Playback/monitor recheck failed.'; return 1
     fi
     timeout --kill-after=1s 5s aplay --device hw:CARD=S3,DEV=0 \

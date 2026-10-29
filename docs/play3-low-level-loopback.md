@@ -56,6 +56,22 @@ Capture/playback are process-time-limited (7s/5s plus at most 1s kill grace).
 There is no retry or automatic gain increase. Timeout, xrun and command failures
 abort the run. Startup/shutdown clicks are not excluded.
 
+### Separately consented +24dB capture comparison
+
+The default remains capture 0dB. After a separately authorized comparison, use:
+
+```nu
+mise exec -- bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring --capture-gain-24db
+```
+
+This requests **exactly +24dB on both capture channels**, aborting if readback
+differs. Only capture gain changes: the Speaker bound (−40dB), left-only reference
+(peak 0.01, three seconds), five-second recording, monitoring mute, timeouts and
+disconnect-before-restore procedure are unchanged. The selection is displayed
+before confirmation and retained in `run-settings.txt`. No arbitrary gain value,
+automatic escalation or replay is supported. The +24dB setting was the user's
+original capture setting; it does not establish input safety or signal presence.
+
 ## Disconnect before restoration
 
 On success, failure or ordinary Ctrl-C/TERM/HUP, the script stops and waits for
