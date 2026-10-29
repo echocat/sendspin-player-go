@@ -85,7 +85,7 @@ sendspin_pw *sendspin_pw_open(uintptr_t token, const char *target, int rate, int
     if (!props) goto fail;
     if (target && *target) pw_properties_set(props, PW_KEY_TARGET_OBJECT, target);
     p->stream = pw_stream_new_simple(pw_thread_loop_get_loop(p->loop), "Sendspin playback", props, &events, p);
-    if (!p->stream) goto fail;
+    if (!p->stream) { *error = errno ? -errno : -EIO; goto fail; }
     uint8_t storage[1024]; struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(storage, sizeof(storage));
     struct spa_audio_info_raw info = {0};
     info.format = SPA_AUDIO_FORMAT_F32; info.rate = rate; info.channels = channels;

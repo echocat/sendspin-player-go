@@ -69,7 +69,7 @@ context.modules = [
 	}
 	config := `context.properties = {
  core.daemon = true core.name = sendspin-test
- default.clock.rate = 48000 default.clock.quantum = 256
+ default.clock.rate = 48000 default.clock.quantum = 1024
  mem.allow-mlock = false support.dbus = false log.level = 1
 }
 context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
@@ -117,6 +117,27 @@ context.objects = [
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	reschedules := 0
+	writeSilence := func(d audio.Device, samples []float32) error {
+		// This is a lifecycle test on a shared CI host, not a scheduling/accuracy
+		// test. If the host overtakes Next, explicitly discard and reschedule only
+		// zeros. Never hide other errors or weaken the production reservation.
+		for attempt := 0; attempt < 8; attempt++ {
+			if _, err := d.Next(ctx); err != nil {
+				return err
+			}
+			err := d.Write(ctx, samples)
+			if !errors.Is(err, render.ErrClockReset) {
+				return err
+			}
+			reschedules++
+			if err = d.Flush(ctx); err != nil {
+				return err
+			}
+		}
+		return errors.New("private fixture repeatedly missed its output reservation")
+	}
+	silence := make([]float32, 4800)
 	for cycle := 0; cycle < 3; cycle++ {
 		linkCtx, stopLink := context.WithCancel(ctx)
 		linked := make(chan error, 1)
@@ -139,20 +160,14 @@ context.objects = [
 				return err
 			}
 			for range 10 {
-				if _, err := d.Next(ctx); err != nil {
-					return err
-				}
-				if err := d.Write(ctx, make([]float32, 4800)); err != nil {
+				if err := writeSilence(d, silence); err != nil {
 					return err
 				}
 			}
 			if err := d.Flush(ctx); err != nil {
 				return err
 			}
-			if _, err := d.Next(ctx); err != nil {
-				return err
-			}
-			return d.Write(ctx, make([]float32, 4800))
+			return writeSilence(d, silence)
 		}()
 		if err != nil {
 			for name, args := range map[string][]string{"ports-out.log": {"-o", "-v"}, "ports-in.log": {"-i", "-v"}, "links.log": {"-l"}} {
@@ -201,11 +216,7 @@ context.objects = [
 		_ = d.Close()
 		t.Fatal(err)
 	}
-	if _, err = d.Next(ctx); err != nil {
-		_ = d.Close()
-		t.Fatal(err)
-	}
-	if err = d.Write(ctx, make([]float32, 4800)); err != nil {
+	if err = writeSilence(d, silence); err != nil {
 		_ = d.Close()
 		t.Fatal(err)
 	}
@@ -234,7 +245,11 @@ context.objects = [
 		t.Fatal("server loss did not wake blocked writer")
 	}
 	_ = d.Close() // Native stop may report the already-disconnected server.
-	t.Log("three native lifecycle cycles and blocked-writer server-loss handling through a private software sink; no hardware measurement;", root)
+	if unexpected, openErr := (Output{Device: "sendspin-null", Logger: recording.NewLogger()}).Open(ctx, audio.Format{SampleRate: 48000, Channels: 2}); openErr == nil {
+		_ = unexpected.Close()
+		t.Fatal("missing private server unexpectedly opened; no fallback is allowed")
+	}
+	t.Log("three native lifecycle cycles and blocked-writer server-loss handling through a private software sink; no hardware measurement; explicit silence reschedules:", reschedules, root)
 }
 
 func linkPrivate(ctx context.Context) error {

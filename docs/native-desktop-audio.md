@@ -154,6 +154,12 @@ loss while a writer is blocked. This is real PipeWire API/lifecycle evidence,
 `var/platform-validation/native-desktop/pipewire`; only the fixture's own short
 runtime socket directory is removed after teardown. Ordinary native audits
 explicitly disable this opt-in, keeping their no-server scope distinct.
+Its 1024-frame graph quantum is a fixture setting, not a recommended hardware
+latency. A shared CI host can overtake a `Next` reservation; the lifecycle harness
+records and bounds explicit flush/rescheduling of **zeros only** for that precise
+`ErrClockReset`. Other failures remain fatal. Production timing guards and the
+exact underrun tests are unchanged; this fixture does not prove uninterrupted
+playback or timing accuracy under host scheduling pressure.
 
 There is no physical +/-1ms synchronization, audibility, rate-window or downstream
 silence certificate. Actual Windows/macOS outputs, real PipeWire hardware routing,
