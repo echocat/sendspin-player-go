@@ -204,6 +204,9 @@ func TestALSASuitePinsHardwareOptOutAndDoesNotInheritEvidence(t *testing.T) {
 	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_DUPLEX_CAPTURE=") {
 		t.Fatal("ordinary ALSA evidence must explicitly disable capture consent")
 	}
+	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_REFERENCE_PLAYBACK=") {
+		t.Fatal("ordinary ALSA evidence must explicitly disable nonzero reference playback")
+	}
 	report, err := p.Report(ReportOptions{Profile: "alsa"})
 	if err != nil {
 		t.Fatal(err)

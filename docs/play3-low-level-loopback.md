@@ -1,7 +1,7 @@
 # Explicit PLAY! 3 direct-cable experiment (unverified wiring)
 
-This optional, interactive Linux/WSL script is **not an SDK test**, not a normal
-mise task and never part of CI. It uses ALSA utilities to check whether a weak
+This optional, interactive Linux/WSL script is not a normal mise task and never
+part of CI. By default it is **not an SDK test**: it uses ALSA utilities to check whether a weak
 analog reference can traverse an explicitly accepted, **unverified** direct
 headphone-output → microphone-input cable. It does not establish that this
 connection is electrically suitable.
@@ -72,6 +72,31 @@ before confirmation and retained in `run-settings.txt`. No arbitrary gain value,
 automatic escalation or replay is supported. The +24dB setting was the user's
 original capture setting; it does not establish input safety or signal presence.
 
+### SDK ALSA output comparison (same levels and waveform)
+
+After the signal path has been inspected, the explicit SDK variant replaces
+`aplay` with the SDK's direct ALSA `Next`/`Write`/`Flush`/`Close` implementation:
+
+```nu
+mise exec -- bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring --capture-gain-24db --sdk-output
+```
+
+It builds a test binary **before any mixer changes**, selects only
+`TestHardwareWeakReferencePlayback`, then uses the same recording, gain checks,
+timeouts, private artifact policy and disconnect-before-restore workflow. SDK
+configuration/results are retained in `sdk-playback.log` and printed after a
+successful run. There is no fallback to `aplay`. An SDK failure stops capture and
+enters the existing cleanup path. The input loader rejects other WAV layouts,
+rates, lengths, nonzero right-channel samples, peaks above 0.01 plus PCM16
+rounding, and a missing 200ms silent tail. It submits all reference frames then
+flushes; pending silence may be dropped but the final marker precedes that tail.
+
+The native entry point is separately consent-gated and skipped by ordinary
+tests. The evidence runner clears that gate even if inherited from the caller.
+Fake-device tests cover reference validation and submission without hardware.
+This is a **backend signal/lifecycle test**, not a Sendspin server/session,
+network-clock, drift-correction or calibrated synchronization acceptance test.
+
 ## Disconnect before restoration
 
 On success, failure or ordinary Ctrl-C/TERM/HUP, the script stops and waits for
@@ -105,7 +130,8 @@ or its executable. Review/share terminal status, mixer text or offline
 The existing offline analyzer runs separately for both capture channels. A weak
 or absent result is inconclusive; the script never raises levels to obtain a
 pass. An aligned recording supports only signal-path/file-alignment observations.
-It is not an SDK playback test, channel-independence proof, absolute latency,
+The default `aplay` variant is not an SDK playback test. Neither variant proves
+channel independence, absolute latency,
 calibrated drift, physical synchronization or electrical safety measurement.
 WSL USB/virtualization effects and potentially shared ADC/DAC clocks remain.
 
@@ -118,4 +144,5 @@ python3 mise-tasks/tests/test_play3_low_level_loopback.py
 These Linux PTY tests run a temporary copy of the script with **all** mixer,
 audio and Go commands replaced by fakes. They cover consent, readback, a partial
 setup failure, capture/playback/xrun failures, ordinary Ctrl-C, disconnect-before-
-restore ordering and failed/missing restoration. They never touch host audio.
+restore ordering, failed/missing restoration and SDK-versus-aplay selection.
+They never touch host audio.

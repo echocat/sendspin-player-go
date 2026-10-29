@@ -91,21 +91,32 @@ finish() {
 }
 
 main() {
-    local capture_db=0 capture_min_db=-999
-    if [[ $# -lt 1 || $# -gt 2 || "$1" != --acknowledge-unverified-wiring ]]; then
-        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db]'
+    local capture_db=0 capture_min_db=-999 sdk_output=0 option
+    if [[ $# -lt 1 || $# -gt 3 || "$1" != --acknowledge-unverified-wiring ]]; then
+        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output]'
         return 2
     fi
-    if [[ $# == 2 ]]; then
-        [[ "$2" == --capture-gain-24db ]] || { fail 'Only the separately consented --capture-gain-24db mode is supported.'; return 2; }
-        capture_db=24
-        capture_min_db=24
+    shift
+    for option in "$@"; do
+        case "$option" in
+            --capture-gain-24db)
+                [[ "$capture_db" == 0 ]] || { fail 'Duplicate capture gain option.'; return 2; }
+                capture_db=24; capture_min_db=24 ;;
+            --sdk-output)
+                [[ "$sdk_output" == 0 ]] || { fail 'Duplicate SDK option.'; return 2; }
+                sdk_output=1 ;;
+            *) fail 'Unsupported option; no automatic gain escalation or device fallback.'; return 2 ;;
+        esac
+    done
+    if [[ "$sdk_output" == 1 && "$capture_db" != 24 ]]; then
+        fail 'SDK comparison requires the already inspected --capture-gain-24db profile.'; return 2
     fi
     [[ "$(uname -s)" == Linux ]] || { fail 'Linux/WSL only.'; return 2; }
     [[ -t 0 && -t 1 ]] || { fail 'An interactive terminal is required; no piped confirmations.'; return 2; }
     exec {terminal_fd}<> /dev/tty
-    for tool in amixer alsactl arecord aplay timeout awk mktemp go grep sleep mkdir cmp; do command -v "$tool" >/dev/null || return 2; done
-    local root tool speaker mic
+    for tool in amixer alsactl arecord timeout awk mktemp go grep sleep mkdir cmp cat; do command -v "$tool" >/dev/null || return 2; done
+    if [[ "$sdk_output" == 0 ]]; then command -v aplay >/dev/null || return 2; fi
+    local root tool speaker mic playback_log
     root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
     printf '%s\n' \
         'PLAY! 3 / S3 only. Close other audio applications using this card.' \
@@ -117,18 +128,25 @@ main() {
         'Five seconds of private microphone recording. No automatic gain increase/retry.' \
         'Ctrl-C stops the run, but stay here to disconnect and restore. Do not close this terminal.'
     printf 'Requested capture gain: %sdB; +24dB requires the explicit extra flag and separate consent.\n' "$capture_db"
+    printf 'SDK output selected: %s (0=aplay baseline, 1=SDK ALSA Next/Write/Flush/Close).\n' "$sdk_output"
     ask 'Cable DISCONNECTED, correct cable, risks accepted? Type VORBEREITEN.' VORBEREITEN || return 2
     mkdir -p "$root/var/platform-validation/play3-low-level"
     work="$(mktemp -d "$root/var/platform-validation/play3-low-level/run-XXXXXXXX")"
     trap finish EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM HUP
-    printf 'capture_gain_db=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" > "$work/run-settings.txt"
+    printf 'capture_gain_db=%s\nsdk_output=%s\nspeaker_max_db=-40\nreference_peak=0.01\ncapture_seconds=5\n' "$capture_db" "$sdk_output" > "$work/run-settings.txt"
 
     # All compilation/file preparation happens BEFORE changing a mixer/opening audio.
     tool="$work/loopback"
     CGO_ENABLED=0 go -C "$root/_examples/loopback" build -o "$tool" . > "$work/build.log" 2>&1
     "$tool" generate -out "$work/reference.wav" -seconds 3 -amplitude 0.01 > "$work/generate.log" 2>&1
+    if [[ "$sdk_output" == 1 ]]; then
+        CGO_ENABLED=1 go -C "$root/audio/alsa" test -c -o "$work/sdk-playback" . > "$work/sdk-build.log" 2>&1
+        playback_log="$work/sdk-playback.log"
+    else
+        playback_log="$work/aplay.log"
+    fi
     mixer info > "$work/card.txt"
     grep -q 'USB041e:324d' "$work/card.txt" || { fail 'S3 is not the expected USB041e:324d PLAY! 3; no mixer changes.'; return 1; }
     mixer scontents > "$work/mixer-before.txt"
@@ -177,16 +195,23 @@ main() {
         ! check_levels "$mic" Capture "$capture_db" "$capture_min_db" || ! check_switch "$mic" Capture on || ! check_switch "$mic" Playback off; then
         fail 'Playback/monitor recheck failed.'; return 1
     fi
-    timeout --kill-after=1s 5s aplay --device hw:CARD=S3,DEV=0 \
-        --disable-resample --disable-channels --disable-format --disable-softvol \
-        "$work/reference.wav" > "$work/aplay.log" 2>&1 &
-    playback_pid=$!
+    if [[ "$sdk_output" == 1 ]]; then
+        SENDSPIN_ALSA_REFERENCE_PLAYBACK=1 SENDSPIN_ALSA_REFERENCE_FILE="$work/reference.wav" \
+            timeout --kill-after=1s 5s "$work/sdk-playback" -test.run '^TestHardwareWeakReferencePlayback$' -test.v -test.timeout=5s > "$playback_log" 2>&1 &
+        playback_pid=$!
+    else
+        timeout --kill-after=1s 5s aplay --device hw:CARD=S3,DEV=0 \
+            --disable-resample --disable-channels --disable-format --disable-softvol \
+            "$work/reference.wav" > "$playback_log" 2>&1 &
+        playback_pid=$!
+    fi
     wait "$playback_pid"
     playback_pid=''
     mixer sset Speaker playback mute >> "$work/setup.log" 2>&1
     wait "$capture_pid"
     capture_pid=''
-    if grep -Eiq 'overrun|underrun|xrun' "$work/arecord.log" "$work/aplay.log"; then
+    if [[ "$sdk_output" == 1 ]]; then cat "$playback_log"; fi
+    if grep -Eiq 'overrun|underrun|xrun' "$work/arecord.log" "$playback_log"; then
         fail 'ALSA reported an xrun; retain diagnostics, do not treat this as a clean run.'
         return 1
     fi
@@ -200,7 +225,7 @@ main() {
             -out "$work/analysis-channel$channel.json" > "$work/analysis-channel$channel.log" 2>&1 || result=$?
         printf 'Offline channel %s: exit %s (0=aligned, nonzero=inconclusive/error).\n' "$channel" "$result"
     done
-    printf 'No automatic gain increase. File alignment is NOT SDK timing or absolute latency.\n'
+    printf 'No automatic gain increase. File alignment is NOT absolute latency or server synchronization.\n'
 }
 
 main "$@"

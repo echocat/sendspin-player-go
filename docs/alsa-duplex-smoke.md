@@ -22,6 +22,8 @@ headphone output back into that input. A proper level/pinout/bias-safe connectio
 is a separate prerequisite for later nonzero loopback measurements.
 An explicitly accepted [unverified direct-cable experiment](play3-low-level-loopback.md)
 is a separate manual workflow, never an extension of this zero-only smoke.
+Its explicit `--sdk-output` variant can exercise the SDK ALSA backend with the
+same bounded weak reference after the analog path is inspected.
 
 ## Run from the repository root (Nushell)
 

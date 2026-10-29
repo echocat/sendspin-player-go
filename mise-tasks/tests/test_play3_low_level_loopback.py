@@ -76,13 +76,17 @@ elif tool == "amixer":
             print(text)
     elif args[0] == "info": print("SYNTHETIC card / USB041e:324d" if fault != "identity" else "SYNTHETIC other card")
     else: print(json.dumps(state, sort_keys=True))
-elif tool in ["arecord", "aplay"]:
+elif tool in ["arecord", "aplay", "sdk-playback"]:
     def stopped(*_):
         event("stopped")
         sys.exit(143)
     signal.signal(signal.SIGTERM, stopped)
     if fault == "record" and tool == "arecord": sys.exit(1)
-    if fault == "play" and tool == "aplay": sys.exit(1)
+    if fault == "play" and tool in ["aplay", "sdk-playback"]: sys.exit(1)
+    if tool == "sdk-playback":
+        assert os.environ["SENDSPIN_ALSA_REFERENCE_PLAYBACK"] == "1"
+        assert pathlib.Path(os.environ["SENDSPIN_ALSA_REFERENCE_FILE"]).name == "reference.wav"
+        assert args == ["-test.run", "^TestHardwareWeakReferencePlayback$", "-test.v", "-test.timeout=5s"]
     if tool == "arecord":
         sys.stdout.buffer.write(b"SYNTHETIC ONLY")
         time.sleep(60 if fault == "record-timeout" else 2)
@@ -213,12 +217,30 @@ class SmokeHarnessTest(unittest.TestCase):
                 self.assertFalse(any(e[0] in ["arecord", "aplay"] for e in events))
 
     def test_arbitrary_gain_options_fail_before_tool_access(self):
-        for args in [("--capture-gain-48db",), ("--capture-gain-24db", "--capture-gain-24db")]:
+        for args in [("--capture-gain-48db",), ("--capture-gain-24db", "--capture-gain-24db"), ("--sdk-output",), ("--sdk-output", "--sdk-output")]:
             with self.subTest(args=args):
                 code, _, events, state, before = self.run_harness(extra_args=args)
                 self.assertNotEqual(code, 0)
                 self.assertFalse(events)
                 self.assertEqual(state, before)
+
+    def test_sdk_mode_replaces_aplay_and_builds_before_mixer_changes(self):
+        code, output, events, state, before = self.run_harness(capture_24db=True, extra_args=("--sdk-output",))
+        self.assertEqual(code, 0, output)
+        self.assertEqual(state, before)
+        self.assertFalse(any(e[0] == "aplay" for e in events))
+        sdk = [i for i,e in enumerate(events) if e[0] == "sdk-playback" and e[1] == "start"]
+        self.assertEqual(len(sdk), 1)
+        build = next(i for i,e in enumerate(events) if e[0] == "go" and "test" in e[2])
+        change = next(i for i,e in enumerate(events) if e[0] == "amixer" and "sset" in e[2])
+        self.assertLess(build, change)
+
+    def test_sdk_output_failure_stops_capture_and_restores(self):
+        code, output, events, state, before = self.run_harness(fault="play", capture_24db=True, extra_args=("--sdk-output",))
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(state, before)
+        self.assertFalse(any(e[0] == "aplay" for e in events))
+        self.assertTrue(any(e[0] == "arecord" and e[1] == "stopped" for e in events))
 
     def test_opt_in_flag_is_required_before_any_tool_access(self):
         code, _, events, state, before = self.run_harness(acknowledge=False)
