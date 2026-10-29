@@ -11,11 +11,12 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdatomic.h>
 
 struct sendspin_pw {
     struct pw_thread_loop *loop;
     struct pw_stream *stream;
-    enum pw_stream_state state;
+    atomic_int state;
     uintptr_t token;
     int rate, channels;
     const struct spa_io_position *position;
@@ -27,7 +28,7 @@ static void init_library(void) { pw_init(NULL, NULL); }
 static void state_changed(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error) {
     (void)error;
     sendspin_pw *p = data;
-    p->state = state;
+    atomic_store(&p->state, state);
     pw_thread_loop_signal(p->loop, false);
     if (state == PW_STREAM_STATE_ERROR || (state == PW_STREAM_STATE_UNCONNECTED && old != PW_STREAM_STATE_UNCONNECTED)) sendspinNativeFail(p->token);
 }
@@ -87,6 +88,7 @@ sendspin_pw *sendspin_pw_open(uintptr_t token, const char *target, int rate, int
     sendspin_pw *p = calloc(1, sizeof(*p));
     *error = -ENOMEM;
     if (!p) return NULL;
+    atomic_init(&p->state, PW_STREAM_STATE_UNCONNECTED);
     p->token = token; p->rate = rate; p->channels = channels;
     p->loop = pw_thread_loop_new("sendspin-playback", NULL);
     if (!p->loop) goto fail;
@@ -133,7 +135,6 @@ int sendspin_pw_stop(sendspin_pw *p) {
     pw_thread_loop_unlock(p->loop); return rc < 0 ? rc : flush;
 }
 int sendspin_pw_check(sendspin_pw *p) {
-    pw_thread_loop_lock(p->loop);
-    int rc = p->state == PW_STREAM_STATE_ERROR || p->state == PW_STREAM_STATE_UNCONNECTED ? -EIO : 0;
-    pw_thread_loop_unlock(p->loop); return rc;
+    int state = atomic_load(&p->state);
+    return state == PW_STREAM_STATE_ERROR || state == PW_STREAM_STATE_UNCONNECTED ? -EIO : 0;
 }
