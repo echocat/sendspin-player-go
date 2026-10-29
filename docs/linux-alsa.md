@@ -118,6 +118,9 @@ with-env {CGO_ENABLED: "1", SENDSPIN_ALSA_SILENCE_DEVICE: "hw:CARD=Device,DEV=0"
 This opt-in opens playback only, at 48kHz/stereo, for three short
 open/write/flush/reopen/close cycles. Ordinary tests skip it. Silence cannot
 prove analog mute/flush, audibility, speed or synchronization.
+An independently consent-gated [ten-second full-duplex smoke](alsa-duplex-smoke.md)
+can additionally run zero-only SDK output alongside an explicit private recording.
+It is test-only, never part of ordinary/CI execution, and not a latency test.
 
 When the USB output-to-line-in loopback card arrives, first identify its output
 and input routes and verify safe levels. Actual nonzero signals and line-in

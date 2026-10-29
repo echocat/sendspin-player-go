@@ -201,6 +201,9 @@ func TestALSASuitePinsHardwareOptOutAndDoesNotInheritEvidence(t *testing.T) {
 	if err != nil || len(calls) != 1 || calls[0].dir != "audio/alsa" || !slices.Contains(calls[0].env, "CGO_ENABLED=1") || !slices.Contains(calls[0].env, "SENDSPIN_ALSA_SILENCE_DEVICE=") {
 		t.Fatal("ALSA suite must not inherit a hardware-test opt-in", calls, err)
 	}
+	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_DUPLEX_CAPTURE=") {
+		t.Fatal("ordinary ALSA evidence must explicitly disable capture consent")
+	}
 	report, err := p.Report(ReportOptions{Profile: "alsa"})
 	if err != nil {
 		t.Fatal(err)

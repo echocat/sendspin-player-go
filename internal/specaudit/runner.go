@@ -91,7 +91,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		return calls, nil
 	case "alsa":
 		calls := goTest("audio/alsa", "-race", "./...")
-		calls[0].env = []string{"CGO_ENABLED=1", "SENDSPIN_ALSA_SILENCE_DEVICE="}
+		calls[0].env = []string{"CGO_ENABLED=1", "SENDSPIN_ALSA_SILENCE_DEVICE=", "SENDSPIN_ALSA_DUPLEX_CAPTURE="}
 		return calls, nil
 	case "desktop-audio":
 		calls := goTest("audio/native", "-race", "./...")
