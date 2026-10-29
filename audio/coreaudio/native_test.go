@@ -196,10 +196,17 @@ func openFakeInput(t *testing.T, f *fakeCoreAudio, uid string) (audio.InputDevic
 	return d, p
 }
 
+func closeFakeDevice(t *testing.T, d interface{ Close() error }) {
+	t.Helper()
+	if err := d.Close(); err != nil {
+		t.Errorf("close fake device: %v", err)
+	}
+}
+
 func TestInputAUHALConfigurationAndNativeCallback(t *testing.T) {
 	f := newFakeCoreAudio(t, true)
 	d, p := openFakeInput(t, f, "test-uid")
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	if f.starts != 0 {
 		t.Fatal("Open started capture")
 	}
@@ -247,7 +254,8 @@ func TestInputAUHALConfigurationAndNativeCallback(t *testing.T) {
 		t.Fatal("capture modified input amplitudes")
 	}
 	// Read retains Go's monotonic component, not a wall-clock reconstruction.
-	if first == first.Round(0) {
+	// Equal ignores that component, so compare the complete time representation.
+	if reflect.DeepEqual(first, first.Round(0)) {
 		t.Fatal("capture timestamp lost monotonic clock")
 	}
 	if err := d.Close(); err != nil {
@@ -274,7 +282,7 @@ func TestOutputAUHALConfigurationAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	if f.starts != 0 || f.properties[0] != (fakeProperty{propertyEnableIO, auInput, 1, 0}) || f.properties[1] != (fakeProperty{propertyEnableIO, auOutput, 0, 1}) {
 		t.Fatal("output did not disable input")
 	}
@@ -369,7 +377,7 @@ func TestInputCloseJoinsRenderBeforeDispose(t *testing.T) {
 func TestInputRejectsRateChangesAndPropagatesRenderErrors(t *testing.T) {
 	f := newFakeCoreAudio(t, true)
 	d, p := openFakeInput(t, f, "")
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	f.rate = 44100
 	if !errors.Is(p.Check(), capture.ErrDriver) {
 		t.Fatal("rate change not detected")
@@ -421,7 +429,7 @@ func TestInputPartialStartFailureStillStopsNativeUnit(t *testing.T) {
 func TestInputZeroStartupTimestampReleasesNoGuessedData(t *testing.T) {
 	f := newFakeCoreAudio(t, true)
 	d, p := openFakeInput(t, f, "")
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	f.render = func(_ *uint32, stamp *audioTimestamp, _ uint32, b *bufferList) int32 {
 		value := float32(0.75)
 		if stamp.HostTime == 0 {
@@ -450,14 +458,14 @@ func TestInputZeroStartupTimestampReleasesNoGuessedData(t *testing.T) {
 	}
 }
 
-func TestInputCancelledAndPartialReadsDoNotStartCapture(t *testing.T) {
+func TestInputCanceledAndPartialReadsDoNotStartCapture(t *testing.T) {
 	f := newFakeCoreAudio(t, true)
 	d, _ := openFakeInput(t, f, "")
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, err := d.Read(ctx, make([]float32, 4)); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled Read: %v", err)
+		t.Fatalf("canceled Read: %v", err)
 	}
 	if _, _, err := d.Read(context.Background(), make([]float32, 3)); err == nil {
 		t.Fatal("accepted partial stereo frame")
@@ -466,7 +474,7 @@ func TestInputCancelledAndPartialReadsDoNotStartCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.starts != 0 {
-		t.Fatal("cancelled, partial or empty Read started capture")
+		t.Fatal("canceled, partial or empty Read started capture")
 	}
 }
 
@@ -482,7 +490,7 @@ func TestInputRejectsDeviceRateMismatchWithoutChangingHardware(t *testing.T) {
 func TestInputReportsSampleTimeDiscontinuity(t *testing.T) {
 	f := newFakeCoreAudio(t, true)
 	d, p := openFakeInput(t, f, "")
-	defer d.Close()
+	defer closeFakeDevice(t, d)
 	flags := uint32(0)
 	stamp := audioTimestamp{SampleTime: 0, HostTime: uint64(bridge.Now()), Flags: 3}
 	if captureCallback(p.token, &flags, &stamp, 1, 2, nil) != 0 {
@@ -504,7 +512,7 @@ func TestInputRejectsMalformedNativeBuffer(t *testing.T) {
 		t.Run(malformed, func(t *testing.T) {
 			f := newFakeCoreAudio(t, true)
 			d, p := openFakeInput(t, f, "")
-			defer d.Close()
+			defer closeFakeDevice(t, d)
 			f.render = func(_ *uint32, _ *audioTimestamp, _ uint32, b *bufferList) int32 {
 				switch malformed {
 				case "count":

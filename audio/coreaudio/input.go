@@ -207,7 +207,7 @@ func (p *inputDriver) Close() error {
 
 func (p *inputDriver) closeLocked() error {
 	p.inputCloseOnce.Do(func() {
-		p.driver.closeLocked()
+		p.closeErr = p.driver.closeLocked()
 		if p.released {
 			p.pins.Unpin()
 			p.samples = nil

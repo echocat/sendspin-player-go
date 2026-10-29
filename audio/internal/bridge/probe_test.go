@@ -16,8 +16,16 @@ var probeCallbacks struct {
 
 func initProbe() {
 	probeCallbacks.once.Do(func() {
-		purego.RegisterFunc(&probeCallbacks.render, purego.NewCallback(func(id uintptr, out *float32, n int32, first int64) { Render(id, out, int(n), first) }))
-		purego.RegisterFunc(&probeCallbacks.fail, purego.NewCallback(func(id uintptr) { Fail(id) }))
+		// Windows callbacks require one uintptr-sized result, even when the
+		// native caller has a void signature and ignores the return register.
+		purego.RegisterFunc(&probeCallbacks.render, purego.NewCallback(func(id uintptr, out *float32, n int32, first int64) uintptr {
+			Render(id, out, int(n), first)
+			return 0
+		}))
+		purego.RegisterFunc(&probeCallbacks.fail, purego.NewCallback(func(id uintptr) uintptr {
+			Fail(id)
+			return 0
+		}))
 	})
 }
 func probe(id uintptr, count int, first int64) []float32 {

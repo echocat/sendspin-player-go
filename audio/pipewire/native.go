@@ -280,21 +280,39 @@ func openStream(device, path string, out *render.Device, in *capture.Device, loo
 	if code = a.loopStart(p.loop); code < 0 {
 		return fail(pwError("loop start", code))
 	}
-	a.loopLock(p.loop)
-	var deadline unix.Timespec
-	code = a.loopGetTime(p.loop, &deadline, 2_000_000_000)
-	for code >= 0 && p.state.Load() != 2 && p.state.Load() != 3 && p.state.Load() != -1 {
-		code = a.loopWait(p.loop, &deadline)
-	}
-	state := p.state.Load()
-	a.loopUnlock(p.loop)
-	if code < 0 {
-		return fail(pwError("stream readiness", code))
-	}
-	if state == -1 {
-		return fail(render.ErrDriver)
+	if err := p.waitReady(); err != nil {
+		return fail(err)
 	}
 	return p, nil
+}
+
+// PipeWire's recursive pthread mutex belongs to an OS thread, not a Go
+// goroutine. Keep its owner pinned across every native call (including waits)
+// until the mutex has actually been released.
+func (p *driver) lockLoop() {
+	runtime.LockOSThread()
+	p.api.loopLock(p.loop)
+}
+func (p *driver) unlockLoop() {
+	p.api.loopUnlock(p.loop)
+	runtime.UnlockOSThread()
+}
+func (p *driver) waitReady() error {
+	p.lockLoop()
+	defer p.unlockLoop()
+	var deadline unix.Timespec
+	code := p.api.loopGetTime(p.loop, &deadline, 2_000_000_000)
+	for code >= 0 && p.state.Load() != 2 && p.state.Load() != 3 && p.state.Load() != -1 {
+		code = p.api.loopWait(p.loop, &deadline)
+	}
+	state := p.state.Load()
+	if code < 0 {
+		return pwError("stream readiness", code)
+	}
+	if state == -1 {
+		return render.ErrDriver
+	}
+	return nil
 }
 func (p *driver) process() {
 	if p.closing.Load() {
@@ -362,16 +380,16 @@ func (p *driver) fail(err error) {
 	}
 }
 func (p *driver) Start() error {
-	p.api.loopLock(p.loop)
+	p.lockLoop()
+	defer p.unlockLoop()
 	code := p.api.streamActive(p.stream, true)
-	p.api.loopUnlock(p.loop)
 	return pwError("start", code)
 }
 func (p *driver) Stop() error {
-	p.api.loopLock(p.loop)
+	p.lockLoop()
+	defer p.unlockLoop()
 	a := p.api.streamActive(p.stream, false)
 	b := p.api.streamFlush(p.stream, false)
-	p.api.loopUnlock(p.loop)
 	return errors.Join(pwError("stop", a), pwError("flush", b))
 }
 func (p *driver) Check() error {

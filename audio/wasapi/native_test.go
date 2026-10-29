@@ -654,7 +654,9 @@ func TestWASAPICaptureQueueGainTimestampAndClose(t *testing.T) {
 	go func() {
 		n, first, err := d.Read(ctx, dst)
 		age := monotime.Since(first)
-		if err == nil && (n != 4 || first.IsZero() || age < 0 || age > time.Second || first == first.Round(0)) {
+		// Equal ignores monotonic readings; compare the complete representation
+		// to prove Read did not reconstruct a wall-clock-only timestamp.
+		if err == nil && (n != 4 || first.IsZero() || age < 0 || age > time.Second || reflect.DeepEqual(first, first.Round(0))) {
 			err = fmt.Errorf("invalid count/monotonic capture time: %d, %v", n, first)
 		}
 		result <- err

@@ -162,7 +162,11 @@ func TestUnjoinedCallbackQuarantinesAndSerializesConcurrentOpen(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer releaseFakeQuarantinedToken(p.token)
-			defer d.Close()
+			defer func() {
+				if err := d.Close(); !errors.Is(err, errQuarantined) {
+					t.Errorf("device Close lost native quarantine: %v", err)
+				}
+			}()
 			// Simulate a callback that cannot be joined. Calling native Close
 			// directly avoids a separate Stop timeout and exercises its real
 			// three-second safety deadline without changing production timing.
