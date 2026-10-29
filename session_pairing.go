@@ -8,6 +8,7 @@ import (
 var errPairingDeadline = errors.New("sendspin: pairing deadline expired before persistence")
 
 func (s *session) endPairing(discard bool) {
+	s.endCodePairing()
 	s.pendingPSK = nil
 	s.pairingDeadline = time.Time{}
 	s.pairingDiscard = discard

@@ -118,6 +118,8 @@ class PairingObserver:
             self.events.append({"type": "pair_init", "pairing_index": index})
         elif kind == "client/pair-finalize":
             self.events.append({"type": "pair_finalize"})
+        elif kind in ("client/pair-pending", "client/pair-auth", "client/pair-confirm", "client/pair-retry"):
+            self.events.append({"type": kind.removeprefix("client/").replace("-", "_")})
         elif kind == "pair/abort":
             reason = payload.get("reason")
             if reason not in ("attempt_timeout", "concurrent_attempt", "method_not_supported", "pairing_code_mismatch", "user_cancelled"):

@@ -3898,7 +3898,7 @@
       "level": "mixed",
       "applies_to": "client",
       "assessment": "T/D",
-      "notes": "Only `pairing_psk` is advertised and implemented. Neither code method is offered; adding display/speech/QR pairing remains outside the initial scope.",
+      "notes": "The frozen baseline/default Client profile advertises only pairing_psk. At explicit user request the SDK now also implements opt-in static/dynamic PIN profiles, one code method per Client. Their extension tests do not promote the frozen PSK-only primary assessments or constitute independent cryptographic/product acceptance; see docs/pin-pairing.md.",
       "sources": [
         {
           "source": "R",
@@ -10503,7 +10503,7 @@
         "session.go"
       ],
       "evidence": [],
-      "notes": "R:5 makes extra code methods optional, but R:19 separately makes the dynamic-over-static preference an uppercase SHOULD for usable out-channels. Preserve that recommendation instead of deriving a blanket MAY exclusion. The accepted PSK-only SDK deliberately offers neither code method and owns no pairing display/speech UI; this is a documented recommendation gap for capable products, not a mandatory PSK failure or authorization to add a code method. Keep the nonimplemented recommendation in the backlog and reassess with an actual operator-interface profile. See rc1-review-decisions.md."
+      "notes": "R:5 makes extra code methods optional, but R:19 separately makes the dynamic-over-static preference an uppercase SHOULD for usable out-channels. The historical PSK-only assessment remains unchanged. The user-requested optional PIN extension now recommends the dynamic display profile and supports static devices separately; physical operator-interface and independent security acceptance remain open, and no frozen assessment is promoted by its tests. See docs/pin-pairing.md and rc1-review-decisions.md."
     },
     {
       "id": "R01.09",
@@ -30152,6 +30152,10 @@
   ],
   "source_gaps": [],
   "unmapped_tests": [
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceStaticPINWindowClosesAfterFiveFailures","reason":"Optional static PIN extension profile: independent five-failure/window/local-unlock test, not a promotion of frozen PSK-baseline source assessments."},
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceDynamicPINGlobalTwentyRoundLimitAndLocalUnlock","reason":"Optional dynamic PIN extension profile: persistent device-global round limit and deliberate unlock evidence, not an independent security audit or frozen primary assessment promotion."},
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceStaticAndDynamicPINPairingBothCipherSuites","reason":"Opt-in PIN extension profile added at user request; independently tested against the pinned server, but not promoted into the frozen PSK-only primary obligation assessments. See docs/pin-pairing.md for scope and remaining security/product review."},
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceDynamicPINRetryUsesSameCode","reason":"Opt-in dynamic PIN extension retry evidence; does not fulfill the frozen baseline's excluded code-method clauses or independent cryptographic review. See docs/pin-pairing.md."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceSustainedPlaybackResourceSoak","reason":"Finite PCM resource soak with virtual output, sustained native streaming, repeated native rekeys/reconnects, slow cooperative output, queue high-water checks, trust/setting retention and joined resources. The default CI duration and explicit longer task record their actual duration/source in var/soak. No physical timing, universal leak bound or complete deployment conformance is inferred."},
     {"id": "e2e:github.com/echocat/sendspin-player-go#TestReferenceImpairedTransportRecoveryAndCancellation", "reason": "Finite userspace loopback transport/load campaign in both connection directions, suites and PCM/FLAC/Opus. Exercises pacing, byte segmentation, abrupt reconnection, retained trust/controls, cancellation and redacted logging. This supplemental deployment evidence does not discharge physical timing, arbitrary LAN/interface behavior or normative-interpretation obligations."}
   ],

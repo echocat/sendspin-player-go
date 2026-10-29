@@ -100,6 +100,8 @@ Development now also includes an optional [direct Linux ALSA module](docs/linux-
 independent of Oto/PortAudio; it is not part of the published v0.1.1 release.
 The optional [native desktop module](docs/native-desktop-audio.md) adds direct
 PipeWire, WASAPI and CoreAudio outputs; it is also unreleased.
+Development also supports optional [dynamic and static PIN pairing](docs/pin-pairing.md),
+with PSK-only behavior retained by default.
 
 ## Develop and test
 

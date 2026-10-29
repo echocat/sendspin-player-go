@@ -47,6 +47,7 @@ type Client struct {
 	mode        string
 	modeUsers   int
 	events      chan Event
+	pairWindow  pairingWindow
 }
 
 // New validates and copies configuration and loads (or creates and saves) the
@@ -58,6 +59,9 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	credentials, err := config.Store.Load(ctx)
 	if errors.Is(err, ErrNoCredentials) {
 		credentials, err = NewCredentials()
+		if err == nil {
+			err = ensureStaticPIN(&credentials, config.CodePairing)
+		}
 		if err == nil {
 			err = config.Store.Save(ctx, credentials)
 		}
@@ -72,6 +76,14 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		return nil, errors.New("sendspin: record capacity smaller than persisted records")
 	}
 	credentials = cloneCredentials(credentials)
+	if config.CodePairing != nil && config.CodePairing.Static && credentials.StaticPairingPIN == nil {
+		if err = ensureStaticPIN(&credentials, config.CodePairing); err != nil {
+			return nil, err
+		}
+		if err = config.Store.Save(ctx, cloneCredentials(credentials)); err != nil {
+			return nil, err
+		}
+	}
 	c := &Client{cfg: config, credentials: credentials, sessions: map[*session]bool{}, events: make(chan Event, 64)}
 	c.logger().Debug("Sendspin client initialized")
 	return c, nil
@@ -254,7 +266,11 @@ func (c *Client) handle(ctx context.Context, conn *websocket.Conn) (result error
 	key := c.credentials.PrivateKey
 	c.mu.Unlock()
 	defer func() {
+		s.endPairing(true)
 		c.mu.Lock()
+		if c.pairWindow.owner == s {
+			c.pairWindow = pairingWindow{}
+		}
 		delete(c.sessions, s)
 		if c.active == s {
 			c.active = nil

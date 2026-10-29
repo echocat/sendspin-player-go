@@ -21,6 +21,12 @@ func (s *session) request(r request) error {
 		return errors.New("sendspin: re-handshake in progress")
 	}
 	switch r.kind {
+	case "pairing/cancel":
+		if s.pendingPSK == nil && s.codePairing == nil {
+			return nil
+		}
+		s.endPairing(true)
+		return s.send("pair/abort", map[string]string{"reason": "user_cancelled"})
 	case "command":
 		command := r.value.(Command)
 		state := s.state.Controller

@@ -13,7 +13,7 @@ import logging
 import struct
 
 from aiohttp import web
-from aiosendspin.models.types import ConnectionReason, PairMethod
+from aiosendspin.models.types import ConnectionReason, PairMethod, PairingCodeFormat
 from aiosendspin.noise.keys import Identity, b64url_decode, psk_id_for
 from aiosendspin.noise.pairing import PairingAttempt, PairingAbortError
 from aiosendspin.noise.trust_store import (
@@ -128,6 +128,7 @@ async def main(config_path):
     pump_stop = None
     pump_samples = 0
     stop = asyncio.Event()
+    operator_codes = asyncio.Queue()
     mdns = MDNSPeer(server, config["mdns"], client_id) if "mdns" in config else None
 
     async def control(request):
@@ -194,6 +195,21 @@ async def main(config_path):
                         client_id=client_id,
                     ),
                 )
+            except PairingAbortError as error:
+                return web.json_response({"pair_abort": error.reason.value})
+        elif kind == "submit_code":
+            # Private loopback operator input; never put the code into events.
+            operator_codes.put_nowait(command["code"])
+        elif kind == "pair_code":
+            method = PairMethod(command["method"])
+            async def provide_code():
+                return await operator_codes.get()
+            try:
+                await server.initiate_pairing(client_id, PairingAttempt(
+                    method=method, pairing_code_provider=provide_code,
+                    pairing_format=PairingCodeFormat.DIGITS if method is PairMethod.DYNAMIC_PAIRING_CODE else None,
+                    on_pair_pending=lambda _message: events.append({"type": "code_pending"}),
+                ))
             except PairingAbortError as error:
                 return web.json_response({"pair_abort": error.reason.value})
         elif kind == "release_pairing":

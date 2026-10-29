@@ -117,6 +117,11 @@ stale or invalid clocks return `ErrTiming`; native failures return an error or
 underrun has overtaken a `Next` reservation, `Write` returns `ErrClockReset`
 instead of silently moving the scheduled samples. The shared SDK renderer owns
 ordinary drift corrections and resynchronization decisions.
+The unreleased root renderer also understands the optional `AudioTimelineReset`
+error capability: it remaps from the original source timestamp with a bounded
+retry budget. Empty/rejected writes do not restart an already-running pipeline;
+partially accepted writes require a native flush before stale-frame removal.
+This recovery is new SDK behavior, not present in the published v0.1.1 renderer.
 The reservation covers consecutive writes (including alignment silence followed
 by media) until another `Next` or `Flush`; an idle gap must not silently rebase
 the second half of a scheduled submission. Blocked writers also poll native

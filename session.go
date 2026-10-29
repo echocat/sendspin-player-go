@@ -46,6 +46,7 @@ type session struct {
 	pendingPSK                          *Secret
 	pairingDeadline                     time.Time
 	pairingDiscard                      bool
+	codePairing                         *codeAttempt
 	active                              map[string]Role
 	streams                             map[string]bool
 	decoder                             codec.AudioDecoder
@@ -235,6 +236,9 @@ func (s *session) run() error {
 			if _, err := s.checkPairingTimeout(monotime.Now()); err != nil {
 				return err
 			}
+			if err := s.advanceCodePairing(); err != nil {
+				return err
+			}
 			if s.timeOutstanding != 0 && s.now()-s.timeOutstanding > 10_000_000 {
 				return errors.New("sendspin: clock synchronization timeout")
 			}
@@ -357,9 +361,7 @@ func (s *session) dispatch(frame []byte) error {
 	case "server/hello", "server/init", "client/hello", "client/init", "server/error", "client/time", "client/state", "client/command", "client/leave", "client/goodbye", "client/pair-init", "client/pair-finalize", "client/pair-pending", "client/pair-auth", "client/pair-confirm", "client/pair-retry":
 		return protocol.ErrProtocol
 	case "server/pair-init", "server/pair-auth", "server/pair-confirm":
-		// These messages belong to code-based methods, never the offered PSK
-		// method. The in-flight discard exception was handled above.
-		return protocol.ErrProtocol
+		return s.codeMessage(m.Type, m.Payload)
 	case "server/activate":
 		return s.activate(m.Payload)
 	case "noise/handshake":
@@ -398,7 +400,7 @@ func (s *session) dispatch(frame []byte) error {
 	case "server/pair-finalize":
 		return s.finalizePairing(m.Payload)
 	case "pair/abort":
-		if s.pairingDiscard || s.pendingPSK == nil {
+		if s.pairingDiscard || (s.pendingPSK == nil && s.codePairing == nil) {
 			return nil
 		}
 		var abort struct {
@@ -409,6 +411,9 @@ func (s *session) dispatch(frame []byte) error {
 		}
 		if !slices.Contains([]string{"user_cancelled", "pairing_code_mismatch"}, abort.Reason) {
 			return protocol.ErrProtocol
+		}
+		if abort.Reason == "user_cancelled" {
+			s.closePairingWindow()
 		}
 		s.endPairing(true)
 		return nil
@@ -432,6 +437,15 @@ func (s *session) dispatch(frame []byte) error {
 func (s *session) sendHello() error {
 	cfg := s.client.cfg
 	p := map[string]any{"name": cfg.Name, "supported_roles": cfg.Roles, "supported_pair_methods": map[string]any{"pairing_psk": map[string]any{}}, "unpaired_access": map[string]bool{"enabled": cfg.AllowUnpaired}}
+	if cfg.CodePairing != nil {
+		methods := p["supported_pair_methods"].(map[string]any)
+		if cfg.CodePairing.Static {
+			methods["static_pairing_code"] = map[string]any{"locations": []string{"operator"}}
+		}
+		if cfg.CodePairing.Display != nil {
+			methods["dynamic_pairing_code"] = map[string]any{"out_channels": []string{"display"}, "formats": []string{"digits"}}
+		}
+	}
 	if cfg.DeviceInfo != nil {
 		p["device_info"] = cfg.DeviceInfo
 	}
@@ -473,6 +487,8 @@ func (s *session) activate(data []byte) error {
 	// including its shape. Defer validation rather than weakening Decode's
 	// rejection of null/incorrect types for other known fields.
 	pairingSupported := true
+	method := ""
+	pairFormat := ""
 	if seen["pairing"] {
 		var pairing struct {
 			Method string  `json:"method"`
@@ -485,6 +501,14 @@ func (s *session) activate(data []byte) error {
 			return protocol.ErrProtocol
 		}
 		pairingSupported = pairing.Method == "pairing_psk" && s.channel.Category == "pr" && pairing.Format == nil
+		method = pairing.Method
+		if pairing.Format != nil {
+			pairFormat = *pairing.Format
+		}
+		if s.channel.Category == "sn" && s.client.cfg.CodePairing != nil {
+			cfg := s.client.cfg.CodePairing
+			pairingSupported = (method == "static_pairing_code" && cfg.Static && pairing.Format == nil) || (method == "dynamic_pairing_code" && cfg.Display != nil && pairFormat == "digits")
+		}
 	}
 	roles := s.state.ActiveRoles
 	if a.Roles != nil {
@@ -568,7 +592,17 @@ func (s *session) activate(data []byte) error {
 		return s.failGoodbye(s.pendingDisplacement)
 	}
 	if seen["pairing"] {
+		s.endPairing(false)
 		s.pairingDiscard = false
+		if method != "pairing_psk" {
+			if err := s.startCodePairing(method); err != nil {
+				return err
+			}
+			if len(roles) > 0 {
+				return s.sendState()
+			}
+			return nil
+		}
 		var psk Secret
 		if _, err := rand.Read(psk[:]); err != nil {
 			return err
@@ -676,6 +710,9 @@ func (c *Client) admit(s *session, rank int, incomingPairing bool) error {
 }
 
 func (s *session) finalizePairing(data []byte) error {
+	if s.codePairing != nil && s.codePairing.state != "finalize" {
+		return protocol.ErrProtocol
+	}
 	if expired, err := s.checkPairingTimeout(monotime.Now()); expired || err != nil {
 		return err
 	}
@@ -721,6 +758,9 @@ func (s *session) finalizePairing(data []byte) error {
 		return err
 	}
 	if err == nil {
+		if s.codePairing != nil {
+			s.closePairingWindow()
+		}
 		s.endPairing(false)
 		s.client.emit(Event{Kind: "paired", ServerID: s.channel.ServerID})
 		s.client.logger().Info("Sendspin pairing record persisted")
