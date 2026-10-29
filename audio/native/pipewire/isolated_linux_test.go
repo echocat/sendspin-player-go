@@ -140,7 +140,7 @@ context.objects = [
 				return err
 			}
 		}
-		return errors.New("private fixture repeatedly missed its output reservation")
+		return fmt.Errorf("private fixture repeatedly missed its output reservation: %+v", d.(*render.Device).Diagnostics())
 	}
 	silence := make([]float32, 4800)
 	for cycle := 0; cycle < 3; cycle++ {

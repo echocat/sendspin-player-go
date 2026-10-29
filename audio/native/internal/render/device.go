@@ -78,6 +78,27 @@ type Device struct {
 	once                    sync.Once
 	closeErr                error
 	now                     func() time.Time
+	diagnostics             Diagnostics
+}
+
+// Diagnostics is internal lifecycle-test metadata, never media or an accuracy
+// measurement. It makes native-quantum/queue mismatches observable without logs
+// or allocations in the render callback.
+type Diagnostics struct {
+	Callbacks, Underruns, Resets                        uint64
+	LastFrames, MaxFrames, QueuedFrames, CapacityFrames int
+	Epoch, Reserved                                     uint64
+}
+
+func (d *Device) Diagnostics() Diagnostics {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	v := d.diagnostics
+	v.QueuedFrames = d.size / d.format.Channels
+	v.CapacityFrames = len(d.ring) / d.format.Channels
+	v.Epoch = d.epoch
+	v.Reserved = d.reserved
+	return v
 }
 
 func Open(ctx context.Context, c Config, f audio.Format, factory Factory) (audio.Device, error) {
@@ -122,6 +143,9 @@ func (d *Device) Process(out []float32, first int64) {
 	clear(out)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.diagnostics.Callbacks++
+	d.diagnostics.LastFrames = len(out) / d.format.Channels
+	d.diagnostics.MaxFrames = max(d.diagnostics.MaxFrames, d.diagnostics.LastFrames)
 	if !d.running || d.fault != nil {
 		return
 	}
@@ -151,6 +175,7 @@ func (d *Device) Process(out []float32, first int64) {
 	d.head = (d.head + n) % len(d.ring)
 	d.size -= n
 	if n < len(out) {
+		d.diagnostics.Underruns++
 		d.epoch++
 	}
 	d.end = start.Add(time.Duration(len(out)/d.format.Channels) * time.Second / time.Duration(d.format.SampleRate))
@@ -329,6 +354,7 @@ func (d *Device) Write(ctx context.Context, samples []float32) error {
 			return err
 		}
 		if epoch != d.epoch {
+			d.diagnostics.Resets++
 			d.mu.Unlock()
 			return ErrClockReset
 		}

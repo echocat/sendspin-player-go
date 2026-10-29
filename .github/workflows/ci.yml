@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Full validation or native desktop diagnostics only (not full CI)
+        type: choice
+        default: full
+        options: [full, native-desktop]
 permissions:
   contents: read
 concurrency:
@@ -11,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   go:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +63,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   e2e:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +86,7 @@ jobs:
           path: var/soak
           if-no-files-found: warn
   quality:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -91,6 +100,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   lint:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +111,7 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
       - run: mise run lint
   mdns:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -113,6 +124,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   conformance:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -127,6 +139,7 @@ jobs:
             var/conformance
           if-no-files-found: warn
   time-filter-reference:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -147,6 +160,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   native-build:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -162,6 +176,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   alsa:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -210,7 +225,7 @@ jobs:
           if-no-files-found: warn
   spec-report:
     name: RC1 traceability (not certification)
-    if: always()
+    if: always() && inputs.scope != 'native-desktop'
     needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build, alsa, desktop-audio]
     runs-on: ubuntu-latest
     steps:
