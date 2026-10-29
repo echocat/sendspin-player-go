@@ -260,13 +260,23 @@ func (s *session) run() error {
 }
 
 func (s *session) send(kind string, payload any) error {
-	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	ctx, cancel := s.applicationWriteContext(kind)
 	defer cancel()
 	err := s.channel.JSON(ctx, kind, payload)
 	if err != nil {
 		s.fatal = err
 	}
 	return err
+}
+
+func (s *session) applicationWriteContext(kind string) (context.Context, context.CancelFunc) {
+	deadline := monotime.Now().Add(5 * time.Second)
+	// Pending does not start the attempt. Abort must remain writable after its
+	// expiry; all actual pairing transmissions share the inclusive attempt cap.
+	if strings.HasPrefix(kind, "client/pair-") && kind != "client/pair-pending" && !s.pairingDeadline.IsZero() && s.pairingDeadline.Before(deadline) {
+		deadline = s.pairingDeadline
+	}
+	return context.WithDeadline(s.ctx, deadline)
 }
 func (s *session) goodbye(reason string) {
 	if !validGoodbyeReason(reason) {

@@ -30152,6 +30152,8 @@
   ],
   "source_gaps": [],
   "unmapped_tests": [
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferencePINCounterStoreFailuresDoNotRevealCredentials","reason":"Opt-in PIN extension hardening: independent Store-refusal tests before emission and after verified confirmation; no promotion of the frozen default PSK-only primary assessments."},
+    {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferencePendingPINCancelDoesNotStartAttempt","reason":"Opt-in static PIN extension hardening: cancellation while gesture-gated persists nothing and emits no pair-init/finalize; separate from frozen primary fulfillment and physical UI acceptance."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceStaticPINWindowClosesAfterFiveFailures","reason":"Optional static PIN extension profile: independent five-failure/window/local-unlock test, not a promotion of frozen PSK-baseline source assessments."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceDynamicPINGlobalTwentyRoundLimitAndLocalUnlock","reason":"Optional dynamic PIN extension profile: persistent device-global round limit and deliberate unlock evidence, not an independent security audit or frozen primary assessment promotion."},
     {"id":"e2e:github.com/echocat/sendspin-player-go#TestReferenceStaticAndDynamicPINPairingBothCipherSuites","reason":"Opt-in PIN extension profile added at user request; independently tested against the pinned server, but not promoted into the frozen PSK-only primary obligation assessments. See docs/pin-pairing.md for scope and remaining security/product review."},

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -75,6 +76,35 @@ func (s *session) advanceCodePairing() error {
 		return s.beginCodeAttempt()
 	}
 	return nil
+}
+
+// Counter writes are part of the same attempt budget as authentication and
+// final persistence. Waiting for Client.mu or a context-cooperative Store must
+// not extend an attempt, and a late-returning Store must not trigger display or
+// credential output. Store-owned/earlier parent deadlines remain distinct.
+func (s *session) updatePairingCounter(update func(*Credentials) error) (bool, error) {
+	if expired, err := s.checkPairingTimeout(monotime.Now()); expired || err != nil {
+		return expired, err
+	}
+	ctx := s.ctx
+	if !s.pairingDeadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, s.pairingDeadline)
+		defer cancel()
+	}
+	err := s.client.update(ctx, func(c *Credentials) error {
+		if !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline) {
+			return errPairingDeadline
+		}
+		return update(c)
+	})
+	if err != nil {
+		if (errors.Is(err, errPairingDeadline) || errors.Is(err, context.DeadlineExceeded)) && !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline) {
+			return s.checkPairingTimeout(monotime.Now())
+		}
+		return false, err
+	}
+	return s.checkPairingTimeout(monotime.Now())
 }
 func (s *session) beginCodeAttempt() error {
 	p := s.codePairing
@@ -165,13 +195,13 @@ func (s *session) codeMessage(kind string, data []byte) error {
 		} else if msg.Nonce != nil {
 			return protocol.ErrProtocol
 		}
-		if err := s.client.update(s.ctx, func(c *Credentials) error {
+		if expired, err := s.updatePairingCounter(func(c *Credentials) error {
 			if c.DynamicPairingRounds >= 20 {
 				return protocol.ErrProtocol
 			}
 			c.DynamicPairingRounds++
 			return nil
-		}); err != nil {
+		}); expired || err != nil {
 			return err
 		}
 		p.round++
@@ -232,8 +262,8 @@ func (s *session) codeMessage(kind string, data []byte) error {
 		}
 		defer clear(isk[:])
 		if p.method == "dynamic_pairing_code" {
-			if err = s.client.update(s.ctx, func(c *Credentials) error { c.DynamicPairingRounds = 0; return nil }); err != nil {
-				return err
+			if expired, storeErr := s.updatePairingCounter(func(c *Credentials) error { c.DynamicPairingRounds = 0; return nil }); expired || storeErr != nil {
+				return storeErr
 			}
 		}
 		sid := p.sid(s.media.pairingIndex)

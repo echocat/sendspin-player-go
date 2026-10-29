@@ -86,6 +86,14 @@ Attempts are bounded by two minutes from pair-init, not pair-pending, including
 Store/UI work. Callbacks/Stores must honor their contexts; the SDK cannot forcibly
 preempt custom code. Go garbage collection prevents a guarantee that every secret
 copy is erased, although PAKE state is consumed and cleared on termination.
+Counter transactions carry that same attempt deadline and are checked again
+after returning, so even a late-returning Store cannot trigger new PIN display
+or credential output. Actual client/pair-* transmissions use the earlier of
+the attempt deadline, parent cancellation and the normal five-second write
+budget; pending/abort notifications do not inherit an expired attempt budget.
+Peer cancellation closes only its bound static window, not an unbound local
+gesture window or another connection's window. The local CancelPairing action
+still deliberately closes the device's local window.
 
 ## Evidence and limits
 
@@ -106,3 +114,6 @@ have explicit extension dispositions, not inherited fulfillment of formerly
 excluded code clauses. A complete optional-profile source inventory/product and
 independent security review remain required before any PIN conformance/security
 certification claim. No historical IDs/assessments or published tags are removed.
+
+See [internal PIN hardening review](pin-pairing-hardening.md) for reproduced
+deadline/window defects, failure-path tests and the limits of that review.

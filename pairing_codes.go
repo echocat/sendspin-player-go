@@ -142,6 +142,8 @@ func (c *Client) CancelPairing(ctx context.Context) error {
 }
 func (s *session) closePairingWindow() {
 	s.client.mu.Lock()
-	s.client.pairWindow = pairingWindow{}
+	if s.client.pairWindow.owner == s {
+		s.client.pairWindow = pairingWindow{}
+	}
 	s.client.mu.Unlock()
 }
