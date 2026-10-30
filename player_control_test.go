@@ -981,14 +981,20 @@ func TestExternalAndFixedProductionSessionUnityAndSlowBackendIsolation(t *testin
 					runDone := make(chan error, 1)
 					go func() { runDone <- s.run() }()
 					t.Cleanup(func() {
-						s.cancel()
+						// The schema fixture shares s.ctx with the peer's HTTP handler.
+						// Let the actor finish before canceling that context, otherwise
+						// peer closure races shutdown and can replace its result with EOF.
+						defer s.cancel()
+						s.displace <- "shutdown"
 						select {
 						case err := <-runDone:
-							if err != nil && !errors.Is(err, context.Canceled) {
+							var goodbye *GoodbyeError
+							if !errors.As(err, &goodbye) || goodbye.Reason != "shutdown" {
 								t.Error("session exited unexpectedly", err)
 							}
 						case <-time.After(3 * time.Second):
-							t.Error("session did not cancel")
+							t.Error("session did not shut down")
+							s.cancel()
 						}
 						<-peerDone
 					})
