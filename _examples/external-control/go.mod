@@ -2,7 +2,7 @@ module github.com/echocat/sendspin-player-go/_examples/external-control
 
 go 1.27.3
 
-require github.com/echocat/sendspin-player-go v0.1.1
+require github.com/echocat/sendspin-player-go v0.0.0
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -16,7 +16,7 @@ require (
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/thesyncim/gopus v0.2.2 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 )
 

@@ -10,13 +10,15 @@ inventing version fallback that RC1 does not negotiate.
 This document records the present scope, **not full certification**. The reference
 server can have defects; successful interoperability is not normative proof.
 
-**Version boundary:** `v0.1.1` remains the recommended stable release. The opt-in
-Source, PIN and host-managed player-control APIs and the purego native-backend
-migration described below are **unreleased**; installing `@v0.1.1` does not provide
-these new APIs. Native input/output implementations are still work in progress.
-The newly configured Linux/macOS/Windows amd64/arm64 backend CI matrix has **not
-run** for this unpushed work. Local software tests and cross-builds are not hosted
-CI results, native execution on another OS, or physical audio measurements.
+**Version boundary:** SDK includes the purego native backends and the
+explicit opt-in PCM16 Source, static/dynamic PIN and host-managed player-control
+APIs. Go 1.27.3 or newer is required. The independent peer remains the locked,
+unmodified `aiosendspin[server]==10.2.1`; the normative RC1 pin above is unchanged.
+The [verified implementation CI run](https://github.com/echocat/sendspin-player-go/actions/runs/41034307574)
+passed **27/27 jobs** at revision `084d704`, including Linux/macOS/Windows
+amd64/arm64 backend software checks. This is not a pass claim for a later release
+commit, full RC1 certification or physical audio measurements. The strict
+`audit:check-conformance` gate intentionally remains blocked.
 
 The [traceability system](traceability.md) now validates the machine-readable
 catalog, generates the clause tables, and correlates actual test/harness results
@@ -64,7 +66,7 @@ cleartext-goodbye path are not adopted.
 | Pairing persistence deadline | Targeted evidence | Attempt deadline is propagated to cooperative local Store.Save; native post-peer-commit/no-actor-ticker expiry clears local pending state and emits attempt_timeout. Earlier parent/store errors are preserved. No remote rollback or arbitrary native/custom-store preemption claim |
 | Initial Sentinel fallback / stored identity binding | Implemented | Independent client/server credential-loss and repair E2E; mismatch cannot bypass an existing record, even with unpaired approval; misbinding cannot displace another server |
 | Unpaired policy / token boundary | Targeted evidence | Actual enabled/disabled hello bool and inverse remote-policy fields are tested through the native encrypted peer; no runtime toggle is added. A fixed RFC-key/PSK emitter vector is independent of the lenient SDK decoder. Conditional printed-QR and live-withdrawal duties are classified; product evidence remains open. Code methods remain unoffered by default; the explicit PIN extension is separate |
-| Static/dynamic PIN pairing | Implemented, opt-in and unreleased | Independent pinned-server tests cover the selected code method, retry/cancellation and counter limits. PSK-only remains the default. Physical operator UI, product acceptance and independent cryptographic assurance remain separate; see [PIN extension](pin-pairing.md) |
+| Static/dynamic PIN pairing | Implemented, opt-in | Independent pinned-server tests cover the selected code method, retry/cancellation and counter limits. PSK-only remains the default. Physical operator UI, product acceptance and independent cryptographic assurance remain separate; see [PIN extension](pin-pairing.md) |
 | Persistent identity, pairing records, output delay | Implemented | Private file roundtrip plus actual FileStore/New-client restart with nondefault volume, mute and delay observed again by the independent peer; CSPRNG generation-source and distinct-device regressions, not statistical entropy certification |
 | Multi-server arbitration / capacity | Implemented | Independent idle/playback/equal-priority/last-server arbitration, active-pairing protection, refused concurrent pairing, buffered-audio handoff, and stalled-peer capacity exhaustion/recovery; deferred displacement through a rejected re-handshake activation; provisional-handshake record eviction and activation-budget tests; more concurrency stress outstanding |
 | mDNS advertise / discover | Implemented | Independent IPv4 and scoped link-local IPv6 multicast/encrypted sessions in both directions, unique instances, metadata/withdrawal, actual isolated interface attach/removal and socket cleanup; native Windows/macOS and broader deployment behavior remain separate |
@@ -76,24 +78,27 @@ cleartext-goodbye path are not adopted.
 | Concurrent admission / full record store | Targeted evidence | Atomic holder/rank publication; canceled contenders cannot retire the holder; three native inadmissible peers bypass a deliberately locked admission path. Full five-record/four-session pairing protects three unfinished handshakes; old-record protection survives pending rekey selection until key commit. Not exhaustive resource/load refusal evidence |
 | Format preference / in-place stream changes | Implemented | Independent PCM16-to-PCM24 E2E; official harness PCM24-to-PCM16 and PCM-to-FLAC changes; broader transitions outstanding |
 | Controller | Implemented | Full state/replacement/seek-bound validation; all 15 command kinds independently observed with exact zero/false/signed-64-bit arguments; native capability changes and role removal/reactivation; known command outer-object checks before player mutation, unsupported source internals opaque; defensive read model; server grouping/backend effects not certified |
-| Host-managed player volume/mute | Implemented, opt-in and unreleased | Fake-target/queue/generation and unity-gain tests distinguish requests from actual readback. Non-nil PlayerControl, including fixed/no-controls, disables software gain without automatic hardware writes. No CEC, ALSA mixer, HDMI policy or physical loudness evidence; see [external player control](external-player-control.md) |
-| Source PCM16 upstream | Implemented, opt-in and unreleased | Deterministic fake Inputs and the unchanged independent server verify explicit start authorization, exact interleaved PCM16, drift-inclusive timestamps, lifecycle/order, bounded backlog, rekey and reconnect. Explicit unpaired source approval is distinct from playback approval. No local monitoring or implicit capture; native ADC accuracy and a full Source clause audit remain open; see [Source extension](source-input.md) |
+| Host-managed player volume/mute | Implemented, opt-in | Fake-target/bounded-FIFO/cancellation/generation and unity-gain tests distinguish requests from actual readback. Nil PlayerControl retains legacy software gain/persistence; non-nil, including fixed/no-controls, selects immutable unity gain without automatic hardware writes or fallback. No CEC, ALSA mixer, HDMI policy or physical loudness evidence; see [external player control](external-player-control.md) |
+| Source PCM16 upstream | Implemented, opt-in | Deterministic fake Inputs and the unchanged independent server verify explicit start authorization, exact interleaved PCM16, drift-inclusive timestamps, lifecycle/order, bounded backlog, rekey and reconnect. Explicit unpaired source approval is distinct from playback approval. No local monitoring or implicit capture; native ADC accuracy and a full Source clause audit remain open; see [Source extension](source-input.md) |
 | Metadata / color | Implemented | Independent current/scheduled/replaced/cleared states, malformed-field rejection and exact large paused progress; one-indexed track validation; exact integer position formula checked against math/big and fuzzed; RGB domains, defensive snapshots, role removal/reactivation and first-state clock-estimate recovery tests; clock/display timing limitations remain |
 | Artwork | Implemented | Independent multipart PNG/JPEG hashes, dimensions/padding, multiple/all-disabled channels, native mid-transfer cancel/replacement/role removal with real transmit barrier, scheduled replacement/cancel/clear, end/resume and malformed wire/config faults; defensive reads/discard accounting; explicit local size limit and broader load/clock/rendering limitations remain |
 | Visualizer | Implemented | All five reference-packed vectors, native beat schedule, strict conditional/full spectrum schema, non-decreasing cross-type timestamps through updates, reserved-bit/ID handling, stale reception/event-barrier checks and clear/end/removal; queue ownership/byte invariants; analysis/rate/physical rendering quality not certified |
 | Exact hello/state output | Targeted software evidence | Both cipher suites and all 64 subsets of the initial six-role profile have independently expected hello fields/support objects; all 64 active subsets have exact state output before/after readiness and while unavailable. DeviceInfo omission combinations, positional artwork arrays, reactivation and preferred-format retention are checked through encrypted scripted-peer messages, not inferred from peer acceptance. Opt-in Source has separate tests, not an inferred exhaustive seven-role subset matrix |
 | Presentation lifecycle across rekey | Targeted software evidence | Same-version explicit/sticky role activations and two actual rekeys preserve metadata/color/controller, complete pending artwork, another in-flight image and queued decoded visualization. Old transfer completion uses new keys and due updates emit once in order. Directly driven actor and controlled clock; no physical display/timing/native-stress claim |
-| Native output/input | Unreleased purego migration | Root packages audio/alsa, audio/pipewire, audio/wasapi, audio/coreaudio and audio/native target CGO-free system APIs. ABI/fake/null-PCM/private-software-graph checks and cross-builds must be attributed to the tested revision. Native hardware opt-ins remain separate from the hosted CI matrix. See [native test contract](native-audio-tests.md) |
-| Explicit no-device output | Unreleased audio/noop | Paced discard output for software use, with no capture implementation and no physical clock evidence. Never an automatic fallback for a failed native backend |
+| Native output/input | Implemented, purego | Root packages audio/alsa, audio/pipewire, audio/wasapi, audio/coreaudio and audio/native target CGO-free system APIs. ABI/fake/null-PCM/private-software-graph checks and cross-builds must be attributed to the tested revision. Native hardware opt-ins remain separate from the hosted CI matrix. See [native test contract](native-audio-tests.md) |
+| Explicit no-device output | audio/noop | Paced discard output for software use, with no capture implementation and no physical clock evidence. Never an automatic fallback for a failed native backend |
 
 Historical Oto/PortAudio results and the [Oto feasibility experiment](oto-feasibility.md)
-describe earlier implementations, not the current backend migration. Those
-backends are being removed from the development tree; their past results and
+describe earlier implementations, not the backends. Those
+backends are removed from the current tree; their past results and
 release tags are not rewritten and cannot establish evidence for replacement
 purego backends. Software timing/flush tests never substitute for physical
 device-clock, downstream-stop or audible-quality measurements.
 Backend-path migration does not promote the frozen P13.04 assessment: it remains
 partial (`P`), with physical evidence still missing.
+The ALSA player E2E through WSL2 to a physical Creative PLAY! 3 recorded in
+[platform validation](platform-validation.md) is a bounded playback result, not
+physical timing/synchronization, native Input or Windows/macOS hardware acceptance.
 
 ### Valid sessions versus fault injection
 
@@ -145,7 +150,7 @@ the remaining IPv6/native-platform limitations.
 ## Scope changes and remaining exclusions
 
 Source capture and static/dynamic PIN pairing were outside the initial released
-profile but are now implemented as explicit **unreleased opt-ins**. They remain
+profile but are included in as explicit **opt-ins**. They remain
 disabled by default. Their supplemental tests do not promote the frozen primary
 inventory's historical assessments; remaining source/security/product/hardware
 review is still required. The following remain outside the current implementation:
@@ -162,8 +167,10 @@ Sendspin/conformance runner/verdict implementation. All 15 passed locally on Lin
 including five protocol-baseline assertions and actual audio-header/payload-size
 evidence. The local adapter registers as **sendspin-player-go**, separate from
 upstream's unrelated **sendspin-go**. No upstream submission has been made.
-These are existing local harness results, not a rerun or hardware validation of
-the WIP backend migration; a changed source fingerprint requires fresh evidence.
+The Linux harness job also passed in the linked `084d704` CI run. These remain
+selected software results, not native-backend hardware validation or a promotion
+of frozen historical assessments; a changed source fingerprint requires fresh
+evidence.
 See [pins, commands, evidence boundaries and exclusions](conformance-testing.md).
 
 ## Normative audit progress
@@ -196,6 +203,7 @@ item without reviewing the requirement it actually exercises.
    against time-filter predictions, the +/-1ms floor, correction audibility,
    startup behavior, jitter, underruns, and sustained sample-clock drift.
 5. Run and inspect the configured amd64/arm64 Linux/macOS/Windows jobs for the
-   exact source revision being released. This new matrix has not yet run for the
-   unpushed migration. Neither old CI results, local cross-builds nor subsequent
-   hosted ABI tests establish physical audio behavior.
+   exact source revision being released. The `084d704` implementation run is
+   verified; a later release commit requires its own validation. Neither earlier
+   CI results, local cross-builds nor hosted ABI tests establish physical audio
+   behavior.

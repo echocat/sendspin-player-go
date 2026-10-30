@@ -1,4 +1,4 @@
-# Direct desktop outputs (unreleased)
+# Direct desktop outputs
 
 The root packages `audio/pipewire`, `audio/wasapi` and `audio/coreaudio`
 provide direct **PipeWire**, **WASAPI** and **CoreAudio** playback. They share one
@@ -8,17 +8,18 @@ The root package `audio/native` selects a backend. Production builds work
 with `CGO_ENABLED=0`; native libraries are loaded at runtime. E2E tests alone
 use the explicit `e2e` build tag. See the [test/CI contract](native-audio-tests.md).
 
-These backends and `audio/alsa` are development code, **not part of v0.1.1**.
-There is no new release/tag. For a local consumer, replace only the root:
+SDK includes these backends and `audio/alsa`; v0.1.1 does not contain
+them. For checkout development, a local consumer can replace only the root:
 
 ```text
 go mod edit -replace github.com/echocat/sendspin-player-go=/absolute/path/to/checkout
 ```
 
-All backend and selector import paths belong to that one module. The new APIs
-are unreleased and require the local root replacement until publication.
-The independent example modules already replace the root with `../..`; neither
-needs a separate `audio/native` module requirement. From the checkout root, use
+All backend and selector import paths belong to that one module/version; a
+ consumer does not need a local replacement or separate backend modules.
+The independent example modules require SDK and replace the root with
+`../..` for checkout development; neither needs a separate `audio/native` module
+requirement. From the checkout root, use
 `go -C _examples/player run . -h` or `mise run build:example`.
 `ampanion` is not modified by this work.
 
@@ -118,7 +119,7 @@ stale or invalid clocks return `ErrTiming`; native failures return an error or
 underrun has overtaken a `Next` reservation, `Write` returns `ErrClockReset`
 instead of silently moving the scheduled samples. The shared SDK renderer owns
 ordinary drift corrections and resynchronization decisions.
-The unreleased root renderer also understands the optional `AudioTimelineReset`
+The root renderer also understands the optional `AudioTimelineReset`
 error capability: it remaps from the original source timestamp with a bounded
 retry budget. Empty/rejected writes do not restart an already-running pipeline;
 partially accepted writes require a native flush before stale-frame removal.

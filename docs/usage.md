@@ -1,15 +1,14 @@
 # SDK usage
 
-**Development / unreleased:** `v0.1.1` remains the recommended stable release,
-but does not contain the new Source, PIN, host-managed player-control or purego
-backend APIs described here. The native backend migration is still WIP. Use a
-matching development checkout when evaluating these APIs; historical release
-tags are unchanged, and no new version or successful CI run is implied.
+**SDK** includes the purego ALSA, PipeWire, WASAPI and CoreAudio backends,
+PCM16 Source, static/dynamic PIN pairing and host-managed player control described
+here. Source, PIN and external player control remain explicit opt-ins. Go 1.27.3
+or newer is required; the pinned RC1 specification and wire versions are unchanged.
 
 The SDK, backends and `audio/native` selector share the root module; import paths
-are unchanged. Each real example has its own `go.mod`/`go.sum`, requiring SDK
-`v0.1.1` with a local `replace` to `../..` for these unreleased APIs, not a separate
-native-module requirement. From the checkout root, use
+are unchanged. Each real example has its own `go.mod`/`go.sum`, requiring SDK with a local `replace` to `../..` for checkout development, not a separate
+native-module requirement. The replacement is not needed to obtain these APIs
+from published. From the checkout root, use
 `go -C _examples/player run . -h` or
 `go -C _examples/external-control run .`. See [module layout](module-layout.md).
 
@@ -127,7 +126,7 @@ access requires explicit server approval, not approval implied by player use;
 `AllowUnpaired` remains false by default. Captured samples never feed local Output.
 Player `available:false` instead reports external playback takeover, not an input.
 
-Optional static/dynamic PIN pairing is also unreleased and explicit through
+Optional static/dynamic PIN pairing is explicit through
 `Config.CodePairing`; nil preserves the default PSK-only offer. See
 [PIN pairing](pin-pairing.md) for method selection and host UI/security duties.
 
@@ -214,7 +213,7 @@ int. A valid string naming an unoffered player command is ignored, including its
 argument body. This is not an escape from active-role/JSON checks or from strict
 argument validation for volume, mute and set_output_delay.
 
-### Host-managed or fixed player volume/mute (unreleased)
+### Host-managed or fixed player volume/mute
 
 `Config.PlayerControl == nil` retains software gain/mute, its short ramp and
 persisted software values. A non-nil `*PlayerControlConfig`, **even an empty one**,
@@ -230,6 +229,9 @@ also does not establish readback. Retain the binding returned by each report.
 `Snapshot.VolumeKnown`/`MutedKnown` distinguish unknown state from 0/false;
 capabilities and known values control which absolute setters are advertised.
 External observations/requests are not persisted; output-delay persistence remains.
+Accepted writes use one bounded serialized FIFO without coalescing; cancellation
+and target/capability/session generation changes invalidate obsolete work. Host
+callbacks must honor cancellation; the SDK cannot forcibly stop arbitrary host code.
 
 The host owns CEC, mixer adapters and HDMI/appliance policy. No such integration
 is built in or demonstrated by fake-control tests. See
@@ -291,20 +293,20 @@ independently enforces the same lexical encoding plus STREAMINFO contents.
 automatically calibrated in this implementation. Physical sync, correction
 audibility, and startup artifacts still need hardware/loopback verification.
 
-## Audio backend comparison (unreleased migration)
+## Audio backend comparison
 
 Concrete backends belong to the **root module** and use purego/system dynamic
 libraries with `CGO_ENABLED=0`; no audio development headers or C compiler are
 required for production builds. OS/architecture implementation files are selected
-at compile time, not by a runtime GOOS switch. Native implementations are WIP,
-targeting Linux/macOS/Windows amd64 and arm64; a cross-build is not native execution.
+at compile time, not by a runtime GOOS switch. The implementations target
+Linux/macOS/Windows amd64 and arm64; a cross-build is not native execution.
 
 | Package | Platform / runtime dependency | Timing and validation boundary |
 | --- | --- | --- |
 | `audio/alsa` | Linux; dynamically loaded libasound | PCM MONOTONIC status, reported delay, native drop; non-HW plugin timing requires explicit AllowPluginTiming. Physical ADC/DAC/FIFO accuracy remains unmeasured |
 | `audio/pipewire` | Linux; libpipewire and a usable graph | Graph/resampler/queue timing and bounded capture/render queues; a private software graph is not hardware evidence |
-| `audio/wasapi` | Windows; system WASAPI/COM APIs | Endpoint audio clock/QPC correlation and explicit capture/render direction; native execution and physical output/input still need validation |
-| `audio/coreaudio` | macOS; system audio frameworks | AUHAL host timestamps; device rate must already match. Native execution and physical output/input still need validation |
+| `audio/wasapi` | Windows; system WASAPI/COM APIs | Endpoint audio clock/QPC correlation and explicit capture/render direction; hosted native software checks do not establish physical output/input behavior |
+| `audio/coreaudio` | macOS; system audio frameworks | AUHAL host timestamps; device rate must already match. Hosted native software checks do not establish physical output/input behavior |
 | `audio/noop` | No audio service or device | Explicit paced discard Output only; no capture, hardware clock, physical silence or synchronization evidence |
 | `audio/native` | Root-module selector using the native backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
 
@@ -345,10 +347,14 @@ fake tests establish neither physical capture timing nor acoustic/electrical saf
 See [Source API](source-input.md) and [native test opt-ins](native-audio-tests.md)
 before opening any input or running a marker/physical-loopback test.
 
-The new amd64/arm64 Linux/macOS/Windows CI matrix is configured but **has not run**
-for this unpushed migration. Local tests/cross-builds, skipped device tests and
-historical artifacts must not be reported as its successful execution. No hardware
-tests have been performed for this migration.
+The [verified implementation CI run](https://github.com/echocat/sendspin-player-go/actions/runs/41034307574)
+for revision `084d704` passed all **27/27 jobs**, including the native-backend
+Linux/macOS/Windows amd64/arm64 software matrix. This is evidence for that revision,
+not a claim about a later release commit or physical timing. The separately recorded
+ALSA player E2E through WSL2 to a physical Creative PLAY! 3 is described in
+[platform validation](platform-validation.md); it does not establish physical
+synchronization, input timing or Windows/macOS hardware acceptance. Device and
+capture opt-ins remain mandatory; skipped device tests are not hardware passes.
 
 ## Credentials
 

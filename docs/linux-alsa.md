@@ -1,4 +1,4 @@
-# Direct Linux ALSA output (unreleased)
+# Direct Linux ALSA output
 
 `audio/alsa` is a root-module package. It uses libasound directly through purego,
 without Oto or PortAudio, CGO, a C compiler, `pkg-config` or development headers.
@@ -8,10 +8,11 @@ Linux amd64/arm64 binaries need the libasound runtime
 Other systems expose an `ErrUnavailable` stub; Linux works with `CGO_ENABLED=0`.
 libasound is a system LGPL-2.1-or-later dependency, not vendored SDK source.
 
-This package is **not in v0.1.1 and has no release tag yet**. Work from this
-checkout until a release is explicitly prepared. For a local consumer use an
-explicit `replace github.com/echocat/sendspin-player-go => /path/to/checkout`.
-Existing published tags are unchanged.
+SDK includes this package; v0.1.1 does not contain it. No separate
+backend module or local replacement is required for a consumer.
+For checkout development, a local consumer can use
+`replace github.com/echocat/sendspin-player-go => /path/to/checkout`.
+Existing historical tags are unchanged.
 
 ## Integration
 
@@ -53,7 +54,7 @@ Oto and PortAudio backends/example selections are retired.
 - ALSA reaches current Linux desktops through their configured plugins, but a
   direct [PipeWire backend](native-desktop-audio.md) is the desktop-native
   complement. Root packages also provide Windows WASAPI and macOS CoreAudio.
-  All are unreleased and physically unmeasured.
+  All share SDK; physical timing remains unmeasured.
 
 ## Scheduling and lifecycle
 
@@ -104,6 +105,9 @@ faults. It explicitly clears the live-test opt-in. Evidence is retained under
 desktop-audio profile and all physical conformance requirements. The complete
 [test/CI contract](native-audio-tests.md) documents the platform matrix, private
 software graph, independent-server scenarios and native marker loopback.
+The existing [real-player ALSA campaign](alsa-e2e.md) remains functional playback
+evidence for its recorded host/revision, not native capture validation, physical
+synchronization or Windows/macOS hardware acceptance.
 
 For an **explicit silence-only hardware lifecycle test**, run in `audio/alsa`
 after checking the selected card. Example in Nushell:

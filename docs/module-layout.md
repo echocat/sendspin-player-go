@@ -6,9 +6,13 @@ modules under those packages. Package import paths are unchanged; backends and
 selector have no independent module/version. Go 1.27.3 or newer is required.
 
 Each real application, `_examples/player` and `_examples/external-control`, has
-its own `go.mod` and `go.sum`. Both require SDK `v0.1.1` and locally replace it
-with `../..`. The replacement is necessary for the unreleased APIs: the published
-`v0.1.1` does not contain them. Neither example requires a separate native module.
+its own `go.mod` and `go.sum`. Both require SDK and locally replace it
+with `../..` for checkout development. A consumer of SDK does not need that
+replacement to access these APIs; v0.1.1 does not contain the new APIs. Neither
+example requires a separate native module.
+
+The SDK release version is independent of core wire version `1`, role versions
+such as `player@v1` / `source@v1` and the pinned Sendspin specification revision.
 
 From the repository root:
 
