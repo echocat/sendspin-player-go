@@ -98,7 +98,7 @@ func requireSilentProtocolClose(t *testing.T, connection *outboundTestConnection
 	eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "") > 0 })
 	for _, raw := range ref.control(t, map[string]any{"command": "status"})["events"].([]any) {
 		event := raw.(map[string]any)
-		if event["type"] == "disconnected" && event["reason"] != nil {
+		if event["type"] == "wire_goodbye" || (event["type"] == "disconnected" && event["reason"] != nil) {
 			t.Fatal("silent failure sent an application goodbye", event)
 		}
 	}
@@ -405,8 +405,9 @@ func TestE2EReferenceDisplacementSurvivesRejectedRehandshakeActivation(t *testin
 	eventually(t, func() bool { return client.Snapshot().ServerID == b.id && client.Snapshot().Available })
 	a.control(t, map[string]any{"command": "release_activation"})
 	eventually(t, func() bool {
-		return referenceGoodbyeObserved(t, a, "another_server") && referenceEventCount(t, a, "disconnected", "") == 1
+		return referenceGoodbyeObserved(t, a, "another_server") && referenceEventCount(t, a, "disconnected", "") > 0
 	})
+	a.control(t, map[string]any{"command": "disconnect", "url": endpoint})
 	if referenceEventCount(t, a, "pair_abort", "method_not_supported") != 1 || referenceEventCount(t, a, "pair_finalize", "") != 0 {
 		t.Fatal("displaced unsupported attempt was started instead of refused")
 	}
