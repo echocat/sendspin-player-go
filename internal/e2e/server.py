@@ -121,6 +121,10 @@ async def configure_peer(config, ready, stop, scope):
     if config.get("hold_pairing", False):
         store.gate.clear()
     events = []
+    scope.events = events
+    scope.release_gates.append(scope.activation_gate.set)
+    if config.get("hold_after_activation", False):
+        scope.activation_gate.clear()
     pairing_observer = (
         PairingObserver(
             events,
@@ -270,6 +274,8 @@ async def configure_peer(config, ready, stop, scope):
             if pairing_observer is None:
                 raise web.HTTPConflict(text="pairing observer is not enabled")
             pairing_observer.followup_gate.set()
+        elif kind == "release_activation_send":
+            scope.activation_gate.set()
         elif kind == "disconnect":
             server.disconnect_from_client(command["url"])
         elif kind == "forget":
@@ -398,6 +404,7 @@ async def configure_peer(config, ready, stop, scope):
         # Open every test gate before joining writers, finalize tasks and sockets.
         await site.stop()
         store.gate.set()
+        scope.activation_gate.set()
         if pairing_observer is not None:
             pairing_observer.close()
         media.close()

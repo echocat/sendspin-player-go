@@ -102,7 +102,8 @@ func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T
 		t.Fatal("pair-init did not reach its transmit barrier")
 	}
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
-	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceEventCount(t, playback, "wire_goodbye", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("already transmitted pair-init was displaced")
 	}
@@ -121,8 +122,10 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                               string
 		initialPlayback, candidatePlayback, preferCandidate, wantCandidate bool
+		holdAfterActivation                                                bool
 	}{
 		{name: "idle-keeps-current"},
+		{name: "goodbye-before-reader-start", holdAfterActivation: true},
 		{name: "idle-prefers-last-playback", preferCandidate: true, wantCandidate: true},
 		{name: "playback-preempts-idle", candidatePlayback: true, wantCandidate: true},
 		{name: "equal-playback-replaces-current", initialPlayback: true, candidatePlayback: true, wantCandidate: true},
@@ -136,7 +139,7 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			}
 			pskA, pskB := Secret{11}, Secret{22}
 			a := startReference(t, cred, pskA, false)
-			b := startReference(t, cred, pskB, false)
+			b := startReferenceWithOptions(t, cred, pskB, false, map[string]any{"hold_after_activation": tc.holdAfterActivation})
 			cred.Records = []PairingRecord{{ServerID: a.id, PSK: pskA}, {ServerID: b.id, PSK: pskB}}
 			if tc.preferCandidate {
 				cred.LastPlaybackServer = b.id
@@ -169,11 +172,46 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			a.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": tc.initialPlayback})
 			referenceArbitrationReady(t, client, a, tc.initialPlayback)
 			b.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": tc.candidatePlayback})
+			if tc.holdAfterActivation {
+				// Let the client finish its refusal while the reference is still
+				// returning from server/activate, before its normal reader starts.
+				eventually(t, func() bool { return referenceEventCount(t, b, "activation_send_held", "") == 1 })
+				eventually(t, func() bool {
+					for {
+						select {
+						case event := <-client.Events():
+							if event.Kind == "disconnected" && logErrorClass(event.Err) == "concurrent_attempt" {
+								return true
+							}
+						default:
+							return false
+						}
+					}
+				})
+				b.control(t, map[string]any{"command": "release_activation_send"})
+				eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") == 1 })
+				// Stop redialing before asserting the first received refusal. A
+				// later successful retry must not mask a lost observation here.
+				b.control(t, map[string]any{"command": "disconnect", "url": endpoint})
+				if referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") != 1 {
+					t.Fatal("first refused connection lost its actual wire goodbye")
+				}
+				for _, raw := range b.control(t, map[string]any{"command": "status"})["events"].([]any) {
+					event := raw.(map[string]any)
+					if event["type"] == "wire_goodbye" {
+						t.Logf("first refusal: native decoder observed reason=%v receive_path=%v", event["reason"], event["receive_path"])
+					} else if event["type"] == "disconnected" {
+						t.Logf("first refusal: native disconnect callback reason=%v", event["reason"])
+					}
+				}
+			}
 			if tc.wantCandidate {
 				referenceArbitrationReady(t, client, b, tc.candidatePlayback)
-				eventually(t, func() bool { return referenceEventCount(t, a, "disconnected", "another_server") > 0 })
+				eventually(t, func() bool { return referenceEventCount(t, a, "wire_goodbye", "another_server") > 0 })
+				eventually(t, func() bool { return referenceEventCount(t, a, "disconnected", "") > 0 })
 			} else {
-				eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "concurrent_attempt") > 0 })
+				eventually(t, func() bool { return referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") > 0 })
+				eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") > 0 })
 				if got := client.Snapshot().ServerID; got != a.id {
 					t.Fatal("rejected candidate displaced current server", got)
 				}
@@ -253,7 +291,8 @@ func referenceArbitrationReadinessIncludesControllerState(t *testing.T) {
 	resume()
 	referenceArbitrationReady(t, client, a, false)
 	b.control(t, map[string]any{"command": "connect", "url": endpoint})
-	eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "concurrent_attempt") == 1 })
+	eventually(t, func() bool { return referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") == 1 })
+	eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") == 1 })
 	b.control(t, map[string]any{"command": "disconnect", "url": endpoint})
 	referenceArbitrationReady(t, client, a, false)
 	persisted, err := store.Load(ctx)
@@ -349,7 +388,8 @@ func TestE2EReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
 		return pairing.control(t, map[string]any{"command": "status"})["pair_finalize_pending"] == true
 	})
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
-	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceEventCount(t, playback, "wire_goodbye", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("in-progress pairing displaced")
 	}

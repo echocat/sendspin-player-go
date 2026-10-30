@@ -9,6 +9,7 @@ from contextvars import ContextVar
 import json
 
 from aiohttp import WSMsgType
+from aiosendspin.models.core import ClientGoodbyeMessage
 from aiosendspin.noise.wire import EncryptedWebSocket
 
 
@@ -19,6 +20,9 @@ class TransportScope:
         self.pairing = None
         self.source = None
         self.artwork = None
+        self.events = None
+        self.activation_gate = asyncio.Event()
+        self.activation_gate.set()
         self.tasks = set()
 
 
@@ -35,9 +39,43 @@ def _scoped_init(transport, *args, **kwargs):
     transport._e2e_scope = current_scope.get()
 
 
+def _observe_goodbye(scope, result, receive_path):
+    if scope.events is None or result.type is not WSMsgType.TEXT or '"client/goodbye"' not in result.data:
+        return
+    try:
+        body = json.loads(result.data)
+        if not isinstance(body, dict) or body.get("type") != "client/goodbye":
+            return
+        message = ClientGoodbyeMessage.from_dict(body)
+    except (LookupError, TypeError, ValueError):
+        return
+    # Independent native Noise decoding and model parsing, never a Go-local
+    # event or a replacement for the native server's disconnected callback.
+    scope.events.append({
+        "type": "wire_goodbye",
+        "reason": message.payload.reason.value if message.payload.reason is not None else "invalid",
+        "receive_path": receive_path,
+    })
+
+
 def _observe(transport, result):
     scope = transport._e2e_scope
     if scope is not None:
+        _observe_goodbye(scope, result, "reader")
+        if result.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR) and transport.closed and not getattr(transport, "_e2e_closed_queue_observed", False):
+            transport._e2e_closed_queue_observed = True
+            # aiohttp can mark a socket closed on the writer's reset before
+            # receive() consumes its queued Binary frame. Its receive() then
+            # returns CLOSED without dequeuing it, so the native disconnect
+            # callback loses the goodbye reason. Inspect that closed tail with
+            # the unmodified native decoder, once, without dequeuing/replaying
+            # frames to the native dispatcher or changing its retry policy.
+            # These private members belong to the pinned fixture dependencies.
+            for raw, _size in list(transport._ws._reader._buffer):
+                if raw.type is WSMsgType.BINARY:
+                    decoded = transport._decode(raw)
+                    if decoded is not None:
+                        _observe_goodbye(scope, decoded, "closed_queue")
         for observer in (scope.pairing, scope.source):
             if observer is not None:
                 observer.observe(result)
@@ -61,6 +99,9 @@ async def _scoped_send_str(transport, data):
         await scope.pairing.send_str(transport, data)
     else:
         await _send_str(transport, data)
+    if scope is not None and not scope.activation_gate.is_set() and '"server/activate"' in data and json.loads(data).get("type") == "server/activate":
+        scope.events.append({"type": "activation_send_held"})
+        await scope.activation_gate.wait()
     if scope is not None and scope.artwork is not None:
         scope.artwork.observe_str(data)
 
