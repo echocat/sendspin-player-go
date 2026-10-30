@@ -520,10 +520,18 @@ func TestExternalCanceledOrExpiredBeforeInvocationDoesNotWithdrawControls(t *tes
 				if err := s.request(request{ctx: ctx, kind: "muted", value: false}); err != nil {
 					t.Fatal(err)
 				}
+				p := c.playerControl
+				p.mu.Lock()
+				queuedCtx := p.queue[0].ctx
+				p.mu.Unlock()
 				if mode == "queued-cancel" {
 					cancel()
 				}
 				<-ctx.Done()
+				// A parent's Done closes before cancellation reaches its children.
+				// Keep the worker blocked until the accepted write has also expired
+				// or been canceled, so this tests cancellation before invocation.
+				<-queuedCtx.Done()
 				if err := s.testControlRequest("volume", 40); err != nil {
 					t.Fatal(err)
 				}
