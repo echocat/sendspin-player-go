@@ -520,10 +520,18 @@ func TestExternalCanceledOrExpiredBeforeInvocationDoesNotWithdrawControls(t *tes
 				if err := s.request(request{ctx: ctx, kind: "muted", value: false}); err != nil {
 					t.Fatal(err)
 				}
+				p := c.playerControl
+				p.mu.Lock()
+				queuedCtx := p.queue[0].ctx
+				p.mu.Unlock()
 				if mode == "queued-cancel" {
 					cancel()
 				}
 				<-ctx.Done()
+				// A parent's Done closes before cancellation reaches its children.
+				// Keep the worker blocked until the accepted write has also expired
+				// or been canceled, so this tests cancellation before invocation.
+				<-queuedCtx.Done()
 				if err := s.testControlRequest("volume", 40); err != nil {
 					t.Fatal(err)
 				}
@@ -981,14 +989,20 @@ func TestExternalAndFixedProductionSessionUnityAndSlowBackendIsolation(t *testin
 					runDone := make(chan error, 1)
 					go func() { runDone <- s.run() }()
 					t.Cleanup(func() {
-						s.cancel()
+						// The schema fixture shares s.ctx with the peer's HTTP handler.
+						// Let the actor finish before canceling that context, otherwise
+						// peer closure races shutdown and can replace its result with EOF.
+						defer s.cancel()
+						s.displace <- "shutdown"
 						select {
 						case err := <-runDone:
-							if err != nil && !errors.Is(err, context.Canceled) {
+							var goodbye *GoodbyeError
+							if !errors.As(err, &goodbye) || goodbye.Reason != "shutdown" {
 								t.Error("session exited unexpectedly", err)
 							}
 						case <-time.After(3 * time.Second):
-							t.Error("session did not cancel")
+							t.Error("session did not shut down")
+							s.cancel()
 						}
 						<-peerDone
 					})

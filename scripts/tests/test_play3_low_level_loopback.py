@@ -1,12 +1,11 @@
 """Hardware-free PTY tests. Every mixer/audio/Go command is replaced by a fake.
 
-Run: python3 mise-tasks/tests/test_play3_low_level_loopback.py
+Run: python3 scripts/tests/test_play3_low_level_loopback.py
 No host audio configuration, audio device or microphone is accessed.
 """
 
 import json
 import os
-import pty
 import select
 import shutil
 import signal
@@ -15,6 +14,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+
+if sys.platform == "linux":
+    import pty
 
 FAKE = r'''
 import json, os, pathlib, shutil, signal, sys, time
@@ -112,9 +114,9 @@ class SmokeHarnessTest(unittest.TestCase):
         preferred_tmp = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
         with tempfile.TemporaryDirectory(prefix="play3-fakes-", dir=preferred_tmp) as tmp:
             root = Path(tmp)
-            (root / "mise-tasks").mkdir()
-            script = root / "mise-tasks" / "play3-low-level-loopback.sh"
-            shutil.copyfile(Path(__file__).resolve().parents[1] / script.name, script)
+            (root / "scripts" / "audio").mkdir(parents=True)
+            script = root / "scripts" / "audio" / "play3-low-level-loopback.sh"
+            shutil.copyfile(Path(__file__).resolve().parents[1] / "audio" / script.name, script)
             tools = root / "fake-bin"
             tools.mkdir()
             fake = tools / "fake"

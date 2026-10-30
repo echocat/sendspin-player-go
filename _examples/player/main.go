@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
-	sendspin "github.com/echocat/sendspin-player-go"
+	"github.com/echocat/sendspin-player-go"
 	"github.com/echocat/sendspin-player-go/codec"
-	log "github.com/echocat/slf4g"
-	_ "github.com/echocat/slf4g/native" // Applications, never the SDK, choose the output.
+	"github.com/echocat/slf4g"
+	_ "github.com/echocat/slf4g/native"
 )
 
 func main() {

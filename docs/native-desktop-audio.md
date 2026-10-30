@@ -4,21 +4,22 @@ The root packages `audio/pipewire`, `audio/wasapi` and `audio/coreaudio`
 provide direct **PipeWire**, **WASAPI** and **CoreAudio** playback. They share one
 bounded, tested callback queue/lifecycle implementation instead of three subtly
 different copies. It does not import Oto, PortAudio or a concrete logging provider.
-The separate `audio/native` module selects a backend. Production builds work
+The root package `audio/native` selects a backend. Production builds work
 with `CGO_ENABLED=0`; native libraries are loaded at runtime. E2E tests alone
 use the explicit `e2e` build tag. See the [test/CI contract](native-audio-tests.md).
 
 These backends and `audio/alsa` are development code, **not part of v0.1.1**.
-There is no new release/tag. For a local consumer, replace the selector and root:
+There is no new release/tag. For a local consumer, replace only the root:
 
 ```text
-go mod edit -replace github.com/echocat/sendspin-player-go/audio/native=/absolute/path/to/checkout/audio/native
 go mod edit -replace github.com/echocat/sendspin-player-go=/absolute/path/to/checkout
-go get github.com/echocat/sendspin-player-go/audio/native@v0.0.0
 ```
 
-The `v0.0.0` above names a local, unreleased module, not a published dependency.
-The new root packages are unreleased and require the local root replacement.
+All backend and selector import paths belong to that one module. The new APIs
+are unreleased and require the local root replacement until publication.
+The independent example modules already replace the root with `../..`; neither
+needs a separate `audio/native` module requirement. From the checkout root, use
+`go -C _examples/player run . -h` or `mise run build:example`.
 `ampanion` is not modified by this work.
 
 ## Use

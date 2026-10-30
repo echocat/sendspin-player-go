@@ -81,8 +81,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 	case "reference":
 		return goTest(".", "-race", "-tags=timefilter_reference", "-timeout=2m", "./internal/timesync"), nil
 	case "examples":
-		calls := append(goTest("_examples/player", "./..."), goTest("_examples/audio-probe", "./...")...)
-		calls = append(calls, goTest("_examples/loopback", "./...")...)
+		calls := append(goTest("_examples/player", "./..."), goTest("_examples/external-control", "./...")...)
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0"}
 		}
@@ -92,7 +91,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		calls[0].env = []string{"CGO_ENABLED=0", "SENDSPIN_ALSA_REQUIRE_LIBRARY=1", "SENDSPIN_ALSA_SILENCE_DEVICE=", "SENDSPIN_ALSA_DUPLEX_CAPTURE=", "SENDSPIN_ALSA_REFERENCE_PLAYBACK=", "SENDSPIN_ALSA_E2E_PLAYBACK=", "SENDSPIN_ALSA_E2E_VIRTUAL="}
 		return calls, nil
 	case "desktop-audio":
-		calls := append(goTest(".", "./audio/internal/...", "./audio/pipewire/...", "./audio/coreaudio/...", "./audio/wasapi/..."), goTest("audio/native", "./...")...)
+		calls := goTest(".", "./audio/internal/...", "./audio/pipewire/...", "./audio/coreaudio/...", "./audio/wasapi/...", "./audio/native/...")
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0", "SENDSPIN_PIPEWIRE_ISOLATED="}
 		}
@@ -355,7 +354,7 @@ func suiteScope(suite string) string {
 	case "desktop-audio-e2e", "alsa-e2e":
 		return "Platform-tagged explicit output, marker loopback and Source/input E2E opt-ins; absent device consent is a visible skip, never hardware evidence; fake/virtual fixtures are separate software-only coverage"
 	case "examples":
-		return "CGO-free example selection and offline synthetic WAV analysis tests; no audio device, capture or physical measurement"
+		return "CGO-free independent player and external-control example module tests; no audio device, capture or physical measurement"
 	}
 	return ""
 }

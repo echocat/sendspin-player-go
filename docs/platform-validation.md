@@ -4,50 +4,59 @@ Runtime execution, compilation, virtual audio and physical measurements are
 different evidence classes. The normal native suite checks callback code without
 opening a sound device. Cross-builds are not native Windows/macOS execution.
 
-## Explicit silence-only output probe
+## Current native validation
 
-The standalone `_examples/audio-probe` module is separate from the player. It never opens input or
-monitor capture, plays nonzero samples, changes volume, or reconfigures the audio
-server. Opening output requires `-run-silence`. A pass covers only same-format
+Use the root SDK native backend unit tests and opt-in E2E routes documented in
+the [native audio test contract](native-audio-tests.md). The standalone
+`_examples/audio-probe` module and its Oto/PortAudio validation tasks are retired;
+there is no separate probe to run.
+
+Ordinary native tests use software fixtures rather than real devices. Backend
+E2E tests require `-tags=e2e` and explicit, matching device consent; without it
+they skip before library, server, output or capture operations. A successful
+command containing skips is not hardware validation. Playback, marker loopback
+and source input have separate opt-in requirements in the contract; playback
+consent never authorizes source capture. No default microphone, mixer or host
+audio routing change is part of these routes.
+
+## Historical silence-only probe evidence (retired)
+
+The former standalone probe opened output only with explicit `-run-silence`
+consent. It did not open input or monitor capture, play nonzero samples, change
+volume or reconfigure the audio server. Its pass covered only same-format
 open/write/query/flush/cancel/close/reopen, not physical timing or downstream stop.
 
-```text
-mise run validate:audio:oto
-mise run validate:audio:portaudio
-```
+The historical PortAudio task required a native compiler and development
+libraries, using automatic `cgo` constraints. The Oto task explicitly opted into
+estimated timing/software-only flush. Default output selection was preserved;
+a missing device/toolchain was **blocked**, never a physical-test pass.
+Existing `var/platform-validation`, `var/oto-output-smoke` and related historical
+artifacts remain unchanged. They are not current native-backend validation or
+normative measurement evidence and cannot satisfy current source fingerprints.
 
-The PortAudio task needs a native compiler and development libraries; its sources
-use only automatic `cgo` constraints. The Oto task explicitly opts into estimated
-timing/software-only flush. Default output selection is preserved. A missing
-device/toolchain is **blocked**, never a physical-test pass. Results belong under
-`var/platform-validation`; these files are not normative measurement evidence.
+### Recorded WSLg with Nix PortAudio setup
 
-### WSLg with Nix PortAudio
+The retired WSLg task supplied the matching Nix ALSA Pulse plugin and created an
+output-only private ALSA route under `var/platform-validation/wslg`.
+`ALSA_PLUGIN_DIR`, `ALSA_CONFIG_PATH` and `PULSE_SERVER` applied only to that
+process tree. It required no `sudo`, Fedora package installation, `~/.asoundrc`,
+`/etc` change, microphone or default host-device change. Its first run could fetch
+Nix dependencies. This describes the historical setup, not a current invocation.
 
-Run this from the repository in WSL (the command also works from Nushell):
+The historical result path was `var/platform-validation/wslg/portaudio.json`.
+Device discovery and silence-only lifecycle over WSLg did not make virtual
+Pulse/ALSA timestamps a physical Linux DAC or a loopback accuracy certificate.
+The probe's start/restart waited for actual callback timing, with cancellation/
+startup bounds, rather than failing before the first asynchronous callback or
+inventing a timestamp.
 
-```text
-mise run validate:audio:portaudio:wslg
-```
+## Recorded execution-target boundary
 
-This task supplies the matching Nix ALSA Pulse plugin and creates an output-only
-private ALSA route under `var/platform-validation/wslg`. `ALSA_PLUGIN_DIR`,
-`ALSA_CONFIG_PATH` and `PULSE_SERVER` apply only to that process tree. No `sudo`,
-Fedora package installation, `~/.asoundrc`, `/etc` change, microphone or default
-host-device change is required. The first run may fetch Nix dependencies.
-
-The result is `var/platform-validation/wslg/portaudio.json`. Device discovery and
-silence-only lifecycle can work over WSLg, but virtual Pulse/ALSA timestamps are
-not a physical Linux DAC or a loopback accuracy certificate. Start/restart waits
-for actual callback timing, with cancellation/startup bounds, instead of failing
-before the first asynchronous callback or inventing a timestamp.
-
-## Current execution-target boundary
-
-The available Linux environment is WSL2 with WSLg/RDP PulseAudio. Its audio server
-can support virtual-stream smoke tests but is not a directly exposed physical
-Linux DAC. Merely finding RDPSink or querying its latency cannot establish RC1
-output accuracy, audibility, hardware speed or physical flush behavior.
+The recorded Linux validation environment was WSL2 with WSLg/RDP PulseAudio. Its
+audio server could support virtual-stream smoke tests but was not a directly
+exposed physical Linux DAC. Merely finding RDPSink or querying its latency cannot
+establish RC1 output accuracy, audibility, hardware speed or physical flush
+behavior.
 
 Windows native tooling can be invoked separately. WSL UNC file locking is not
 supported by the available Windows Go path, so native tests need a fresh source
@@ -58,8 +67,9 @@ must stay separately labelled and must not replace race-enabled evidence slots.
 
 Executables themselves can remain under the repository's `var` directory and run
 directly through WSL interop. The source snapshot is needed for Windows Go file
-locking/source-aware tests, not for executing a Windows `.exe`. The silence probe
-can therefore be cross-compiled into `var` and executed there natively.
+locking/source-aware tests, not for executing a Windows `.exe`. This also allowed
+the former silence probe to be cross-compiled into `var` and executed there
+natively; that historical route is retired.
 
 The first actual Windows run exposed coarse runtime-clock assumptions: fast
 loopback RTTs could collapse to zero and startup would not converge. Protocol

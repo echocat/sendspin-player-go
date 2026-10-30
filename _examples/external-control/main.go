@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	sendspin "github.com/echocat/sendspin-player-go"
+	"github.com/echocat/sendspin-player-go"
 	"github.com/echocat/sendspin-player-go/audio"
 )
 

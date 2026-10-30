@@ -47,7 +47,7 @@ The immutable `AllowUnpaired` policy is not a live revocation API. Any future
 setter must linearize admission/revocation and emit `pairing_required` before
 closing relying sessions, not disguise cancellation's `shutdown` as revocation.
 Printed product QR labels remain a separate credential-provisioning/packaging
-obligation; the standalone audio probe is unrelated.
+obligation; native audio test results are unrelated.
 
 See [review decisions](rc1-review-decisions.md) for the retained assumptions and
 prepared, unsubmitted clarification questions. None is silently resolved by this

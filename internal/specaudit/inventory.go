@@ -154,12 +154,12 @@ func Discover(root string) (Inventory, error) {
 				if !active() && active("e2e") {
 					suite = "alsa-e2e"
 				}
-			case moduleRoot == "audio/native" || strings.HasPrefix(directory, "audio/internal/") || slices.Contains([]string{"audio/pipewire", "audio/coreaudio", "audio/wasapi"}, directory):
+			case directory == "audio/native" || strings.HasPrefix(directory, "audio/internal/") || slices.Contains([]string{"audio/pipewire", "audio/coreaudio", "audio/wasapi"}, directory):
 				suite = "desktop-audio"
 				if !active() && active("e2e") {
 					suite = "desktop-audio-e2e"
 				}
-			case strings.HasPrefix(moduleRoot, "_examples/"):
+			case strings.HasPrefix(directory, "_examples/"):
 				suite = "examples"
 			case active():
 				suite = "unit"
@@ -217,7 +217,7 @@ func walkInputs(root string, visit func(string, []byte) error) error {
 			if slices.Contains([]string{"var", ".git", ".idea", ".venv", "__pycache__", "node_modules"}, entry.Name()) {
 				return filepath.SkipDir
 			}
-			if len(parts) == 1 && !slices.Contains([]string{"audio", "codec", "diagnostic", "discovery", "internal", "_examples", "docs", "mise-tasks", ".github", "LICENSES"}, parts[0]) {
+			if len(parts) == 1 && !slices.Contains([]string{"audio", "codec", "diagnostic", "discovery", "internal", "_examples", "docs", "mise-tasks", "scripts", ".github", "LICENSES"}, parts[0]) {
 				return filepath.SkipDir
 			}
 			return nil

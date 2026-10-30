@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,29 @@ func TestCLIHasNoImplicitActionOrUnsafeGeneration(t *testing.T) {
 		if err := run(context.Background(), args, &stdout, &stderr); err == nil {
 			t.Fatal("invalid/implicit command accepted", args)
 		}
+	}
+}
+
+func TestCLIHelp(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"short", []string{"-h"}, "No device access, playback or capture."},
+		{"long", []string{"--help"}, "No device access, playback or capture."},
+		{"command", []string{"help"}, "No device access, playback or capture."},
+		{"generate", []string{"generate", "-h"}, "Required new WAV path; existing files are never overwritten"},
+		{"analyze", []string{"analyze", "-h"}, "Required recording/synthetic WAV; no recording is started"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := run(context.Background(), tt.args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String()+stderr.String(), tt.want) {
+				t.Fatalf("help missing %q: stdout=%q stderr=%q", tt.want, stdout.String(), stderr.String())
+			}
+		})
 	}
 }

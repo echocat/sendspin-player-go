@@ -1,6 +1,7 @@
-# Offline loopback preparation
+# Internal offline loopback preparation
 
-A dependency-free, pure-Go **file tool**, not an audio backend or recorder. It
+A dependency-free, pure-Go internal **test preparation file tool**, not a public
+example, audio backend or recorder. It
 generates a reference WAV/manifest and aligns a separately supplied WAV against
 it. No command opens an audio device, plays a sound, records input, changes a
 mixer/volume, loads a native audio library, starts a server or uses the network.
@@ -10,6 +11,9 @@ mixer/volume, loads a native audio library, starts a server or uses the network.
 From the repository root:
 
 ```text
+CGO_ENABLED=0 go test ./internal/loopbackcmd
+CGO_ENABLED=0 go run ./internal/loopbackcmd generate -h
+CGO_ENABLED=0 go run ./internal/loopbackcmd analyze -h
 mise run test:loopback
 mise run test:loopback:artifacts
 mise run build:loopback
@@ -104,7 +108,8 @@ risks and disconnect-before-restore procedure. It is not part of this offline to
   a 250-million sample-product budget. Narrow `-search-ms` when file origins
   are already known; a budget failure is not silently treated as success.
 
-The standalone module is excluded from SDK archives. Its synthetic known-answer,
+The command belongs to the repository's root Go module under `internal/loopbackcmd`;
+it is not a standalone module or public SDK API. Its synthetic known-answer,
 missing/duplicate marker, drift/discontinuity, tail, channel, parser and CLI
-no-overwrite tests run as part of the cross-platform CGO-free examples suite.
+no-overwrite tests run as part of the cross-platform CGO-free unit suite.
 They provide software-analysis evidence only, not physical conformance credit.

@@ -45,7 +45,7 @@ hardware or hosted-CI acceptance. Historical releases/results remain unchanged.
 | `Output` / `Device` | One render worker owns the device; borrowed samples must be copied if retained. Context cooperation is required. Hardware truth and downstream flush guarantees are backend contracts, not established by a virtual output. |
 | `Input` / `InputDevice` | Explicit Input plus SourceRole; the Client calls Open only after an active/available/synchronized source receives a valid server start. Read returns a channel-multiple sample count and first-sample ADC time in local Go monotonic time; dst is borrowed, capture queues bounded, discontinuities explicit. Stop/removal/unavailability/disconnect clear authorization; no local input monitoring or automatic resume. |
 | `PlayerControl` / host bindings | Nil keeps legacy software gain/persistence. Non-nil, even empty/fixed, means immutable unity gain without software mute/ramping. Bind/Report/start/reconnect never invoke setters or replay stored settings. Explicit writes use a bounded worker; request completion is not readback. Generation/capability/session changes invalidate old writes. No hardware-control adapter or software fallback is supplied. |
-| Native backend selection | Concrete purego backends are root packages; optional audio/native is a nested selector module with compile-time platform files. Linux auto prefers usable PipeWire, then ALSA; explicit backend/library-path failures return errors without fallback. Noop is an explicit output-only discard choice, never a failed-native or capture fallback. |
+| Native backend selection | All purego backends and audio/native share the root module; the selector uses compile-time platform files. Linux auto prefers usable PipeWire, then ALSA; explicit backend/library-path failures return errors without fallback. Noop is an explicit output-only discard choice, never a failed-native or capture fallback. |
 | observer/codec hooks | Prompt, nonreentrant, potentially concurrent where documented; payload ownership is explicit. Diagnostic hooks are not default logging. |
 | logging | Only slf4g facade in runtime SDK; provider selected by the host, optional per-Client injection. Raw peer/backend errors, credentials and media are not default log fields. |
 
@@ -64,14 +64,16 @@ and [external player-control](external-player-control.md) for the precise contra
   native-backend ABI/software profiles and platform matrix. These are required
   checks, not a claim that the new workflow has already executed.
 - The module archive test extracts and tests the distributable root with CGO
-  disabled. Concrete ALSA/PipeWire/WASAPI/CoreAudio/noop packages now belong to
-  that root archive. Examples, the nested native selector, runtime artifacts and
-  Python environments remain outside it; shared caches/temp directories are untouched.
+  disabled. Backends, selector and internal Go tools belong to that root archive;
+  each real example has its own `go.mod`/`go.sum`. Local archive selection uses
+  Git-versioned files only, explicitly excludes `_examples`, `internal/e2e` and
+  `internal/conformancetest`, and rejects tracked `var` data. Ignored/untracked
+  generated data is not read or archived. No harness/`var` module markers are
+  needed; shared caches/temp directories are untouched.
 - Check separate consumer modules without local SDK replacements before a tag.
   A checkout-local replacement against the root is not proof that a published
-  v0.1.1 dependency provides these new APIs. The optional selector/example pins
-  need matching publishable root versions before a future authorized release;
-  do not modify historical tags or invent an already released version.
+  v0.1.1 dependency provides these new APIs. There is only one publishable Go SDK
+  module/version; do not modify historical tags or invent an already released version.
 - Oto/PortAudio source/jobs/tasks are retired in development. Historical callback
   or WSLg/silence-only results describe their original source, not replacement
   backends. Production purego builds require no audio development headers or C

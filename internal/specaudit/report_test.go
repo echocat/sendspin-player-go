@@ -263,7 +263,7 @@ func TestBackendInventoryUsesRootPackagesAndSeparateOptInSuites(t *testing.T) {
 		}
 	}
 	calls, err := p.invocations("desktop-audio", false)
-	if err != nil || len(calls) != 2 || calls[0].dir != "." || calls[1].dir != "audio/native" {
+	if err != nil || len(calls) != 1 || calls[0].dir != "." || !slices.Contains(calls[0].args, "./audio/native/...") {
 		t.Fatal(calls, err)
 	}
 	for _, call := range calls {

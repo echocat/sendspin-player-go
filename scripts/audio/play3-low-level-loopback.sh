@@ -102,7 +102,7 @@ finish() {
 main() {
     local capture_db=0 capture_min_db=-999 sdk_output=0 e2e=0 option
     if [[ $# -lt 1 || $# -gt 5 || "$1" != --acknowledge-unverified-wiring ]]; then
-        fail 'Usage: bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output] [--connected-leave-muted] [--e2e]'
+        fail 'Usage: bash scripts/audio/play3-low-level-loopback.sh --acknowledge-unverified-wiring [--capture-gain-24db] [--sdk-output] [--connected-leave-muted] [--e2e]'
         return 2
     fi
     shift
@@ -143,7 +143,7 @@ main() {
     if [[ "$e2e" == 0 ]]; then command -v arecord >/dev/null || return 2; else command -v uv >/dev/null || return 2; fi
     if [[ "$sdk_output" == 0 ]]; then command -v aplay >/dev/null || return 2; fi
     local root tool speaker mic playback_log capture_seconds=5
-    root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+    root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
     printf '%s\n' \
         'PLAY! 3 / S3 only. Close other audio applications using this card.' \
         'This is an UNVERIFIED direct headphone-to-microphone connection.' \
@@ -181,7 +181,7 @@ main() {
 
     # All compilation/file preparation happens BEFORE changing a mixer/opening audio.
     tool="$work/loopback"
-    CGO_ENABLED=0 go -C "$root/_examples/loopback" build -o "$tool" . > "$work/build.log" 2>&1
+    CGO_ENABLED=0 go -C "$root" build -o "$tool" ./internal/loopbackcmd > "$work/build.log" 2>&1
     "$tool" generate -out "$work/reference.wav" -seconds 3 -amplitude 0.01 > "$work/generate.log" 2>&1
     if [[ "$sdk_output" == 1 ]]; then
         CGO_ENABLED=0 go -C "$root/audio/alsa" test -tags=e2e -c -o "$work/sdk-playback" . > "$work/sdk-build.log" 2>&1

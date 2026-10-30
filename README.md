@@ -83,8 +83,10 @@ See [SDK usage and audio contracts](docs/usage.md).
 
 ## Player example
 
-The example is an independent module under [`_examples/player`](_examples/player).
-Build with `mise run build:example`. Native libraries are loaded only at device
+The application under [`_examples/player`](_examples/player) has its own
+`go.mod`/`go.sum` and uses the checkout's SDK through a local replacement.
+Build with `mise run build:example`; inspect help with
+`go -C _examples/player run . -h`. Native libraries are loaded only at device
 Open; no native compiler or development headers are needed for the player:
 
 ```text
@@ -100,10 +102,10 @@ chooses it. No backend selection is a physical synchronization certificate.
 
 Credentials default to the operating system's user-config directory, not the source
 tree. This is an example application, not a production-ready packaged player.
-See [backends and their limitations](docs/usage.md#audio-backend-comparison).
-The [direct Linux ALSA package](docs/linux-alsa.md) and other platform backends
-share the SDK module; the optional [native selector](docs/native-desktop-audio.md)
-offers a platform-independent entry point. These APIs are unreleased.
+See [backends and their limitations](docs/usage.md#audio-backend-comparison-unreleased-migration).
+The [direct Linux ALSA package](docs/linux-alsa.md), other platform backends and
+the [native selector](docs/native-desktop-audio.md) share the SDK module. The
+selector offers a platform-independent entry point. These APIs are unreleased.
 Development also supports optional [dynamic and static PIN pairing](docs/pin-pairing.md),
 with PSK-only behavior retained by default.
 
@@ -118,7 +120,7 @@ mise run check:full
 ```
 
 `mise run format` and `mise run lint` use the pinned **golangci-lint** v2 configuration,
-including tagged SDK sources and formatting of the independent player example.
+including tagged SDK sources and separate checks for both example modules.
 Project build outputs, test reports and fixture environments live under [`var`](docs/generated-files.md); shared tool caches and system temporary directories keep their defaults.
 
 `mise run test:e2e` starts the pinned **aiosendspin 10.2.1** reference server.
@@ -149,12 +151,12 @@ Additional hardware-free work is documented in the [transport/load campaign](doc
 [cryptographic source review](docs/cryptographic-review.md), supplemental
 [template inventory](docs/rc1-template-inventory.json), and
 [extension contracts](docs/extension-boundaries.md). None is physical conformance evidence.
-The silence-only output probe is a separate `_examples/audio-probe` module,
-not a command nested inside the player; invoking live output still requires an
-explicit opt-in and is not part of hardware-free tests.
-The independent [offline loopback tool](_examples/loopback) prepares reference
+The internal [offline loopback tool](internal/loopbackcmd) prepares reference
 WAVs and analyzes supplied recordings without playback, capture or audio-library
 dependencies. Synthetic known-answer results are not physical timing evidence.
+Real examples under `_examples/player` and `_examples/external-control` each have
+their own module; SDK backends, selector and internal Go tools stay in the root
+module. See [module layout](docs/module-layout.md).
 
 ## Host-managed volume/mute
 

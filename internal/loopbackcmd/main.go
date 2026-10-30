@@ -1,4 +1,4 @@
-// Command loopback generates reference WAV files and analyzes recordings offline.
+// Command loopbackcmd generates reference WAV files and analyzes recordings offline.
 // It contains no audio, capture, mixer, network or native-library integration.
 package main
 

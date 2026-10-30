@@ -6,6 +6,13 @@ backend APIs described here. The native backend migration is still WIP. Use a
 matching development checkout when evaluating these APIs; historical release
 tags are unchanged, and no new version or successful CI run is implied.
 
+The SDK, backends and `audio/native` selector share the root module; import paths
+are unchanged. Each real example has its own `go.mod`/`go.sum`, requiring SDK
+`v0.1.1` with a local `replace` to `../..` for these unreleased APIs, not a separate
+native-module requirement. From the checkout root, use
+`go -C _examples/player run . -h` or
+`go -C _examples/external-control run .`. See [module layout](module-layout.md).
+
 ## Lifecycle and ownership
 
 `Config.Specification` explicitly pins the protocol profile. Empty selects
@@ -299,7 +306,7 @@ targeting Linux/macOS/Windows amd64 and arm64; a cross-build is not native execu
 | `audio/wasapi` | Windows; system WASAPI/COM APIs | Endpoint audio clock/QPC correlation and explicit capture/render direction; native execution and physical output/input still need validation |
 | `audio/coreaudio` | macOS; system audio frameworks | AUHAL host timestamps; device rate must already match. Native execution and physical output/input still need validation |
 | `audio/noop` | No audio service or device | Explicit paced discard Output only; no capture, hardware clock, physical silence or synchronization evidence |
-| `audio/native` | Optional **separate selector module**, using the root backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
+| `audio/native` | Root-module selector using the native backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
 
 No backend has physical +/-1-ms certification. Oto and PortAudio are removed from
 the current backend surface; their historical release implementations/results do
