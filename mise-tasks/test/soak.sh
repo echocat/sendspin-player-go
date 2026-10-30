@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+#MISE description="Sustained virtual-output resource soak; three minutes per cipher suite by default"
+#MISE depends=["prepare"]
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "${MISE_PROJECT_ROOT:?Run this file task through mise}"
 mkdir -p var/soak
 log=$(mktemp var/soak/events-XXXXXXXX.jsonl)
 status=0

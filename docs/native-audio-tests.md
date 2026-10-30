@@ -1,7 +1,7 @@
 # Native audio test contract (unreleased)
 
 All concrete backends are root packages: `audio/alsa`, `audio/pipewire`,
-`audio/coreaudio`, `audio/wasapi`. `audio/native` is a separate selector module.
+`audio/coreaudio`, `audio/wasapi` and the `audio/native` selector share one module.
 Production builds use purego/system dynamic libraries with `CGO_ENABLED=0`; no
 audio development headers or C compiler are required. The optional race task
 uses CGO for Go's race runtime, not for backend implementation.
@@ -73,7 +73,7 @@ system default input. For PipeWire/WASAPI it still names a sink/render endpoint,
 not a microphone. For CoreAudio/ALSA a distinct ADC ID may be needed. Confirm
 wiring/levels independently; peak 0.01 is not an electrical safety guarantee.
 
-The fixture builds `_examples/loopback` **before opening any device**, generates
+The fixture builds `internal/loopbackcmd` **before opening any device**, generates
 a three-second 48kHz/stereo left-only reference at peak 0.01, captures five to
 six seconds through the native Input API and requires the offline analyzer to
 find the expected markers. Zero-only output/capture smoke is not a substitute.

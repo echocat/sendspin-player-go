@@ -10,12 +10,13 @@ Review the [API/package findings](api-release-review.md), independent
 alongside the remaining conformance evidence; none authorizes a tag by itself.
 
 1. Run `mise run check:full` on a clean checkout and inspect all CI OS jobs.
-2. Build/test both example variants and the independent PortAudio module; record
-   hardware results and Oto's explicitly approximate timing/stop limitations.
+2. Build/test the root-module player and fake host-control examples, native
+   selector/backends and internal offline test tools. Record native hardware
+   results separately from fake/loopback/software-graph evidence.
 3. Review the spec, reference-server, decoder and tool pins; include dependency
    changes and remaining conformance limitations in the release notes.
 4. Ensure the distributable root module does not contain credentials, virtual
-   environments, binaries, or nested example modules. The archive test validates
+   environments or binaries. The archive test validates
    module boundaries, not every possible sensitive filename.
 5. Tag the root module using Go semantic versioning. Do not use the Sendspin
     specification release number as the SDK version by implication.
@@ -27,10 +28,8 @@ blocked today. A green software-evidence profile is not permission to advertise
 full RC1 or physical synchronization conformance. The human clause table is
 generated from `rc1-requirements.json`; do not hand-edit it to remove open gaps.
 
-The independent PortAudio module uses the unchanged import path ending in
-`/audio/portaudio`. Its v0.1.1 release requires root SDK v0.1.1 rather than an
-orphaned historical pseudo-version; its local development `replace` is ignored
-by consumers. Test a separate consumer without local replacements. Its Go version tags
-use the submodule prefix, e.g. `audio/portaudio/v0.1.1`; root tags do not publish it.
-The example has local `replace` directives for both modules and is not separately
-published. No release automation pushes tags or publishes artifacts.
+The current tree has one publishable Go module. The Python harness marker
+`go.mod` files exist only to exclude harness environments from SDK archives;
+they have no Go dependencies or release/version lifecycle. Historical PortAudio
+submodule tags remain untouched but are not part of the current backend surface.
+No release automation pushes tags or publishes artifacts.

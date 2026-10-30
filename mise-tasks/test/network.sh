@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+#MISE description="Repeat isolated userspace transport/load scenarios without hardware or host network changes"
+#MISE depends=["prepare"]
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "${MISE_PROJECT_ROOT:?Run this file task through mise}"
 mkdir -p var/network-load
 log=$(mktemp var/network-load/campaign-XXXXXXXX.jsonl)
 status=0

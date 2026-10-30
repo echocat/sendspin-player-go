@@ -33,8 +33,8 @@ func TestReferenceServerPrivatePipeWireScenario(t *testing.T) {
 	t.Cleanup(cancel)
 	// Build before isolating HOME, preserving the caller's normal Go caches.
 	tool := filepath.Join(private, "loopback-tool")
-	build := exec.CommandContext(ctx, "go", "build", "-o", tool, ".")
-	build.Dir = filepath.Join(root, "_examples/loopback")
+	build := exec.CommandContext(ctx, "go", "build", "-o", tool, "./internal/loopbackcmd")
+	build.Dir = root
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off")
 	if err := build.Run(); err != nil {
 		t.Fatal("build offline reference tool:", err)

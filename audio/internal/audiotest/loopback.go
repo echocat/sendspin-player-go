@@ -164,7 +164,7 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "_examples", "loopback", "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "internal", "loopbackcmd", "main.go")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -176,8 +176,8 @@ func repositoryRoot(t *testing.T) string {
 }
 
 func buildLoopbackTool(ctx context.Context, root, target string) error {
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", target, ".")
-	cmd.Dir = filepath.Join(root, "_examples", "loopback")
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", target, "./internal/loopbackcmd")
+	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off")
 	return cmd.Run()
 }

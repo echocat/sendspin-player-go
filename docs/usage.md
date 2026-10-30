@@ -299,7 +299,7 @@ targeting Linux/macOS/Windows amd64 and arm64; a cross-build is not native execu
 | `audio/wasapi` | Windows; system WASAPI/COM APIs | Endpoint audio clock/QPC correlation and explicit capture/render direction; native execution and physical output/input still need validation |
 | `audio/coreaudio` | macOS; system audio frameworks | AUHAL host timestamps; device rate must already match. Native execution and physical output/input still need validation |
 | `audio/noop` | No audio service or device | Explicit paced discard Output only; no capture, hardware clock, physical silence or synchronization evidence |
-| `audio/native` | Optional **separate selector module**, using the root backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
+| `audio/native` | Root-module selector using the native backends | Selects a backend through compile-time platform files; adds no independent timing guarantee |
 
 No backend has physical +/-1-ms certification. Oto and PortAudio are removed from
 the current backend surface; their historical release implementations/results do

@@ -81,8 +81,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 	case "reference":
 		return goTest(".", "-race", "-tags=timefilter_reference", "-timeout=2m", "./internal/timesync"), nil
 	case "examples":
-		calls := append(goTest("_examples/player", "./..."), goTest("_examples/audio-probe", "./...")...)
-		calls = append(calls, goTest("_examples/loopback", "./...")...)
+		calls := goTest(".", "./_examples/player", "./_examples/external-control")
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0"}
 		}
@@ -92,7 +91,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		calls[0].env = []string{"CGO_ENABLED=0", "SENDSPIN_ALSA_REQUIRE_LIBRARY=1", "SENDSPIN_ALSA_SILENCE_DEVICE=", "SENDSPIN_ALSA_DUPLEX_CAPTURE=", "SENDSPIN_ALSA_REFERENCE_PLAYBACK=", "SENDSPIN_ALSA_E2E_PLAYBACK=", "SENDSPIN_ALSA_E2E_VIRTUAL="}
 		return calls, nil
 	case "desktop-audio":
-		calls := append(goTest(".", "./audio/internal/...", "./audio/pipewire/...", "./audio/coreaudio/...", "./audio/wasapi/..."), goTest("audio/native", "./...")...)
+		calls := goTest(".", "./audio/internal/...", "./audio/pipewire/...", "./audio/coreaudio/...", "./audio/wasapi/...", "./audio/native/...")
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0", "SENDSPIN_PIPEWIRE_ISOLATED="}
 		}

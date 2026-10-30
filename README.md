@@ -83,7 +83,7 @@ See [SDK usage and audio contracts](docs/usage.md).
 
 ## Player example
 
-The example is an independent module under [`_examples/player`](_examples/player).
+The example is a root-module application under [`_examples/player`](_examples/player).
 Build with `mise run build:example`. Native libraries are loaded only at device
 Open; no native compiler or development headers are needed for the player:
 
@@ -101,9 +101,9 @@ chooses it. No backend selection is a physical synchronization certificate.
 Credentials default to the operating system's user-config directory, not the source
 tree. This is an example application, not a production-ready packaged player.
 See [backends and their limitations](docs/usage.md#audio-backend-comparison).
-The [direct Linux ALSA package](docs/linux-alsa.md) and other platform backends
-share the SDK module; the optional [native selector](docs/native-desktop-audio.md)
-offers a platform-independent entry point. These APIs are unreleased.
+The [direct Linux ALSA package](docs/linux-alsa.md), other platform backends and
+the [native selector](docs/native-desktop-audio.md) share the SDK module. The
+selector offers a platform-independent entry point. These APIs are unreleased.
 Development also supports optional [dynamic and static PIN pairing](docs/pin-pairing.md),
 with PSK-only behavior retained by default.
 
@@ -149,12 +149,11 @@ Additional hardware-free work is documented in the [transport/load campaign](doc
 [cryptographic source review](docs/cryptographic-review.md), supplemental
 [template inventory](docs/rc1-template-inventory.json), and
 [extension contracts](docs/extension-boundaries.md). None is physical conformance evidence.
-The silence-only output probe is a separate `_examples/audio-probe` module,
-not a command nested inside the player; invoking live output still requires an
-explicit opt-in and is not part of hardware-free tests.
-The independent [offline loopback tool](_examples/loopback) prepares reference
+The internal [offline loopback tool](internal/loopbackcmd) prepares reference
 WAVs and analyzes supplied recordings without playback, capture or audio-library
 dependencies. Synthetic known-answer results are not physical timing evidence.
+Real examples under `_examples/player` and `_examples/external-control` use the
+same root module. See [module layout](docs/module-layout.md).
 
 ## Host-managed volume/mute
 

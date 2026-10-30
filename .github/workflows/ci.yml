@@ -41,25 +41,23 @@ jobs:
       - name: Record CGO-free example tests
         run: go run ./internal/specauditcmd run --suite examples
       - name: Build offline WAV analysis tool without CGO or audio libraries
-        working-directory: _examples/loopback
         env:
           CGO_ENABLED: '0'
-        run: go build -o ../../var/bin/loopback/ .
+        run: go build -o "var/bin/loopback/loopback$(go env GOEXE)" ./internal/loopbackcmd
+        shell: bash
       - name: Test ALSA purego ABI/null PCM or platform stub without hardware
         env:
           CGO_ENABLED: '0'
         run: go test -count=1 ./audio/alsa
       - name: Test native selector without CGO or hardware
-        working-directory: audio/native
         env:
           CGO_ENABLED: '0'
-        run: go test -count=1 ./...
+        run: go test -count=1 ./audio/native
       - name: Build the native player without CGO or a C compiler
-        working-directory: _examples/player
         env:
           CGO_ENABLED: '0'
         run: |
-          go build -o ../../var/bin/native/ .
+          go build -o var/bin/native/ ./_examples/player
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -115,6 +113,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
       - run: mise run lint
+      - name: Validate file-task discovery and fake shell orchestration
+        if: runner.os == 'Linux'
+        run: mise run test:tasks
   mdns:
     if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest

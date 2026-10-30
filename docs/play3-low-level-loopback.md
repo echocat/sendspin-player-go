@@ -61,7 +61,7 @@ separate [ALSA E2E task](alsa-e2e.md), which opens no microphone input.
 From the repository root:
 
 ```nu
-mise exec -- bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring
+mise run test:alsa:play3 --acknowledge-unverified-wiring
 ```
 
 The script is Bash, deliberately launched explicitly from Nushell. It first
@@ -92,7 +92,7 @@ abort the run. Startup/shutdown clicks are not excluded.
 The default remains capture 0dB. After a separately authorized comparison, use:
 
 ```nu
-mise exec -- bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring --capture-gain-24db
+mise run test:alsa:play3 --acknowledge-unverified-wiring --capture-gain-24db
 ```
 
 This requests **exactly +24dB on both capture channels**, aborting if readback
@@ -109,7 +109,7 @@ After the signal path has been inspected, the explicit SDK variant replaces
 `aplay` with the SDK's direct ALSA `Next`/`Write`/`Flush`/`Close` implementation:
 
 ```nu
-mise exec -- bash mise-tasks/play3-low-level-loopback.sh --acknowledge-unverified-wiring --capture-gain-24db --sdk-output
+mise run test:alsa:play3 --acknowledge-unverified-wiring --capture-gain-24db --sdk-output
 ```
 
 It builds a test binary **before any mixer changes**, selects only
@@ -170,7 +170,7 @@ WSL USB/virtualization effects and potentially shared ADC/DAC clocks remain.
 ## Hardware-free harness regression tests
 
 ```text
-python3 mise-tasks/tests/test_play3_low_level_loopback.py
+python3 scripts/tests/test_play3_low_level_loopback.py
 ```
 
 These Linux PTY tests run a temporary copy of the script with **all** mixer,
