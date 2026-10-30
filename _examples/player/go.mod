@@ -3,7 +3,7 @@ module github.com/echocat/sendspin-player-go/_examples/player
 go 1.27.3
 
 require (
-	github.com/echocat/sendspin-player-go v0.1.1
+	github.com/echocat/sendspin-player-go v0.2.0
 	github.com/echocat/slf4g v1.9.0
 	github.com/echocat/slf4g/native v1.9.0
 )

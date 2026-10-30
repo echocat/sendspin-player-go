@@ -5,9 +5,9 @@ A Go SDK for Sendspin players, targeting specification **1.0.0-rc1** at
 Requires **Go 1.27.3+**. The SDK core, including PCM, FLAC and Opus decoding, is
 pure Go. Native audio input/output is optional and uses purego, without CGO.
 
-**Status:** SDK **v0.1.1**; the API may change before v1. See [release notes](CHANGELOG.md).
-The current development branch adds unreleased native I/O, source and host-control
-APIs and removes the old Oto/PortAudio adapters. Published tags remain unchanged.
+**Status:** SDK **v0.2.0**; the API may change before v1. See [release notes](CHANGELOG.md).
+This release adds native I/O, Source, optional PIN pairing and host-managed player
+control, and removes the old Oto/PortAudio adapters. Historical tags remain unchanged.
 This is not a declaration of complete RC1 conformance.
 Independent server interoperability is tested; physical synchronization has not
 been measured. See [coverage and remaining work](docs/conformance.md).
@@ -34,12 +34,12 @@ process-global provider.
 - Pluggable audio I/O and codecs; purego ALSA, PipeWire, WASAPI and CoreAudio,
   a compile-time platform selector, and an explicitly selected no-hardware noop output.
 - Opt-in [source@v1 capture](docs/source-input.md): backend-neutral `audio.Input`,
-  server-authorized PCM16 upstream, never direct local monitoring (unreleased).
+   server-authorized PCM16 upstream, never direct local monitoring.
 
 ## Embed
 
 ```sh
-go get github.com/echocat/sendspin-player-go@v0.1.1
+go get github.com/echocat/sendspin-player-go@v0.2.0
 ```
 
 ```go
@@ -102,11 +102,11 @@ chooses it. No backend selection is a physical synchronization certificate.
 
 Credentials default to the operating system's user-config directory, not the source
 tree. This is an example application, not a production-ready packaged player.
-See [backends and their limitations](docs/usage.md#audio-backend-comparison-unreleased-migration).
+See [backends and their limitations](docs/usage.md#audio-backend-comparison).
 The [direct Linux ALSA package](docs/linux-alsa.md), other platform backends and
 the [native selector](docs/native-desktop-audio.md) share the SDK module. The
-selector offers a platform-independent entry point. These APIs are unreleased.
-Development also supports optional [dynamic and static PIN pairing](docs/pin-pairing.md),
+selector offers a platform-independent entry point. SDK v0.2.0 also supports
+optional [dynamic and static PIN pairing](docs/pin-pairing.md),
 with PSK-only behavior retained by default.
 
 ## Develop and test

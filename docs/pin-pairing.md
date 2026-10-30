@@ -1,8 +1,9 @@
-# Optional PIN pairing (unreleased)
+# Optional PIN pairing (v0.2.0)
 
 Both RC1 PIN procedures are supported in addition to mandatory PSK/token pairing:
 **dynamic six-digit codes** and **static eight-digit per-device codes**. They
-are opt-in development APIs, not part of the published v0.1.1 SDK.
+are opt-in APIs in SDK **v0.2.0**, not part of v0.1.1. PSK-only pairing remains
+the unchanged default when `CodePairing` is nil.
 
 RC1 permits **at most one code method in a client's hello**. The SDK implements
 both, but each Client selects either Static or Display; configuring both is an

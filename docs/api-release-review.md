@@ -4,12 +4,15 @@ This review covers the reusable SDK, not a product certification or permission t
 publish a version tag. Specification RC1, wire version 1 and SDK version remain
 independent. No tag or binary release is created by the checks below.
 
-**Release boundary:** `v0.1.1` is still the recommended stable release, without the
-new Source/PIN/host-managed player-control and purego backend APIs. Those changes
-are unreleased. Native output/input replacement implementations remain WIP; the
-new Linux/macOS/Windows amd64/arm64 CI matrix is configured but has not run for the
-unpushed migration. Local software tests/cross-builds are not native-platform,
-hardware or hosted-CI acceptance. Historical releases/results remain unchanged.
+**Release boundary:** SDK `v0.2.0` includes the purego ALSA, PipeWire, WASAPI and
+CoreAudio backends, PCM16 Source, static/dynamic PIN and host-managed player-control
+APIs. The latter three remain explicit opt-ins; Go 1.27.3 or newer is required.
+The pinned RC1 baseline and the unmodified `aiosendspin[server]==10.2.1` peer remain
+unchanged. The [verified implementation CI run](https://github.com/echocat/sendspin-player-go/actions/runs/41034307574)
+passed **27/27 jobs** at revision `084d704`, including the Linux/macOS/Windows
+amd64/arm64 native-backend software matrix. This does not claim a pass for a later
+release commit, physical timing or full conformance. Historical releases/results
+remain unchanged.
 
 ## Findings addressed
 
@@ -44,7 +47,7 @@ hardware or hosted-CI acceptance. Historical releases/results remain unchanged.
 | `Store` | Atomic full snapshots, one owning Client, cooperative deadlines. Save must not call back into Client methods because the transaction holds the credential lock. Cancellation cannot undo a committed remote/local change. |
 | `Output` / `Device` | One render worker owns the device; borrowed samples must be copied if retained. Context cooperation is required. Hardware truth and downstream flush guarantees are backend contracts, not established by a virtual output. |
 | `Input` / `InputDevice` | Explicit Input plus SourceRole; the Client calls Open only after an active/available/synchronized source receives a valid server start. Read returns a channel-multiple sample count and first-sample ADC time in local Go monotonic time; dst is borrowed, capture queues bounded, discontinuities explicit. Stop/removal/unavailability/disconnect clear authorization; no local input monitoring or automatic resume. |
-| `PlayerControl` / host bindings | Nil keeps legacy software gain/persistence. Non-nil, even empty/fixed, means immutable unity gain without software mute/ramping. Bind/Report/start/reconnect never invoke setters or replay stored settings. Explicit writes use a bounded worker; request completion is not readback. Generation/capability/session changes invalidate old writes. No hardware-control adapter or software fallback is supplied. |
+| `PlayerControl` / host bindings | Nil keeps legacy software gain/persistence. Non-nil, even empty/fixed, means immutable unity gain without software mute/ramping. Bind/Report/start/reconnect never invoke setters or replay stored settings. Explicit writes use one bounded serialized FIFO without coalescing; request completion is not readback. Cancellation and generation/capability/session changes invalidate old writes. Host setters must cooperate with context cancellation. No hardware-control adapter or software fallback is supplied. |
 | Native backend selection | All purego backends and audio/native share the root module; the selector uses compile-time platform files. Linux auto prefers usable PipeWire, then ALSA; explicit backend/library-path failures return errors without fallback. Noop is an explicit output-only discard choice, never a failed-native or capture fallback. |
 | observer/codec hooks | Prompt, nonreentrant, potentially concurrent where documented; payload ownership is explicit. Diagnostic hooks are not default logging. |
 | logging | Only slf4g facade in runtime SDK; provider selected by the host, optional per-Client injection. Raw peer/backend errors, credentials and media are not default log fields. |
@@ -62,27 +65,32 @@ and [external player-control](external-player-control.md) for the precise contra
 - Run `mise run check:full` on a clean matching checkout, validate all independent
   example modules and the optional selector separately, and run the configured
   native-backend ABI/software profiles and platform matrix. These are required
-  checks, not a claim that the new workflow has already executed.
+  checks. The linked `084d704` implementation run passed; the release commit
+  requires its own validation rather than inheriting that pass.
 - The module archive test extracts and tests the distributable root with CGO
   disabled. Backends, selector and internal Go tools belong to that root archive;
-  each real example has its own `go.mod`/`go.sum`. Local archive selection uses
-  Git-versioned files only, explicitly excludes `_examples`, `internal/e2e` and
+  each real example has its own `go.mod`/`go.sum`. The root SDK has no submodules.
+  Local archive selection uses Git-versioned files only, explicitly excludes
+  `_examples`, `internal/e2e` and
   `internal/conformancetest`, and rejects tracked `var` data. Ignored/untracked
   generated data is not read or archived. No harness/`var` module markers are
   needed; shared caches/temp directories are untouched.
-- Check separate consumer modules without local SDK replacements before a tag.
-  A checkout-local replacement against the root is not proof that a published
-  v0.1.1 dependency provides these new APIs. There is only one publishable Go SDK
-  module/version; do not modify historical tags or invent an already released version.
-- Oto/PortAudio source/jobs/tasks are retired in development. Historical callback
+- Check separate consumer modules without local SDK replacements when validating
+  the published version. Examples require SDK `v0.2.0`; their local `replace` to
+  `../..` selects checkout development, not a prerequisite for these APIs in
+  published `v0.2.0`. There is only one publishable Go SDK module/version;
+  historical tags remain unchanged.
+- Oto/PortAudio source/jobs/tasks are retired. Historical callback
   or WSLg/silence-only results describe their original source, not replacement
   backends. Production purego builds require no audio development headers or C
   compiler; optional Go race instrumentation still needs its own C toolchain.
 - Keep library-load/ABI, private null-PCM/graph, independent fake-device protocol,
   explicit device-loopback and physical timing evidence distinct. Skipped hardware
-  tests are skips, never passes. Native implementation work is ongoing and no
-  hardware tests have been performed for this migration. Follow the explicit
-  device/privacy opt-ins in [native audio tests](native-audio-tests.md).
+  tests are skips, never passes. The separately recorded ALSA player E2E through
+  WSL2 to a physical Creative PLAY! 3 is described in [platform validation](platform-validation.md).
+  It does not establish physical timing/synchronization, native Input acceptance
+  or Windows/macOS hardware behavior. Follow the explicit device/privacy opt-ins
+  in [native audio tests](native-audio-tests.md).
 - Fixed independent Noise vectors, isolated IPv6/interface hotplug and sustained
   software soak add finite evidence, not physical synchronization or formal
   cryptographic assurance. The existing strict conformance gate stays blocked.

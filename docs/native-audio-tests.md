@@ -1,10 +1,15 @@
-# Native audio test contract (unreleased)
+# Native audio test contract (v0.2.0)
 
 All concrete backends are root packages: `audio/alsa`, `audio/pipewire`,
 `audio/coreaudio`, `audio/wasapi` and the `audio/native` selector share one module.
 Production builds use purego/system dynamic libraries with `CGO_ENABLED=0`; no
 audio development headers or C compiler are required. The optional race task
 uses CGO for Go's race runtime, not for backend implementation.
+
+SDK v0.2.0 includes these output/input APIs, not a hardware certification.
+Native capture hardware has not been validated, and physical synchronization
+remains unverified. Attribute each software/CI result to its tested revision;
+an earlier implementation run is not final release-commit validation.
 
 ## Software validation, no real devices
 
@@ -104,6 +109,10 @@ reconnect PCM 30s, FLAC 60s and final stop. It checks decoded/submitted nonzero
 frames and output cleanup, not physical audibility, latency or stop-silence.
 It never opens capture. The private receipt explicitly records virtual output
 and private software graph state. Native failure never falls back to a fake.
+
+The existing [ALSA real-player campaign](alsa-e2e.md) remains functional playback
+evidence for its recorded host/revision. It is not capture, physical clock-sync
+or Windows/macOS device evidence and is not a new v0.2.0 release-commit result.
 
 The existing ALSA test name and `SENDSPIN_ALSA_*` variables are retained.
 Scripts must now pass `-tags=e2e` and `SENDSPIN_ALSA_E2E_DEVICE`; there is no

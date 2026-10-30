@@ -4,14 +4,15 @@ The repository follows cli4g's library-first layout: public API at the root,
 focused public subpackages, private `internal` implementations, independent
 `_examples` modules, docs, mise tasks/locks, and GitHub Actions.
 
-**Unreleased migration:** `v0.1.1` remains the recommended stable release, but
-does not include the new Source, PIN, host-managed player-control or purego backend
-APIs. Concrete audio backends use root packages `audio/alsa`,
+**SDK v0.2.0** includes PCM16 Source, static/dynamic PIN pairing, host-managed
+player control and purego native backends. These API opt-ins retain their explicit
+capture, pairing and host-control requirements. Go **1.27.3 or newer** is required.
+Concrete audio backends use root packages `audio/alsa`,
 `audio/pipewire`, `audio/wasapi`, `audio/coreaudio` and `audio/noop`; the optional
 `audio/native` selector and internal Go tools also belong to the root module.
 Each real example has its own `go.mod`/`go.sum`. Oto/PortAudio are no longer
-current development backends. Native implementations are still WIP. Historical
-release tags and recorded results are not rewritten by this migration.
+current backends. Historical release tags and recorded results are not rewritten
+by v0.2.0; the pinned RC1 baseline remains unchanged.
 
 Production SDK/backend builds target `CGO_ENABLED=0`, using purego/system dynamic
 libraries without audio development headers or a C compiler. Runtime libraries,
@@ -28,7 +29,8 @@ ordinary Go tests use the frozen C++ vectors and remain compiler-independent
 (apart from the C compiler already required when enabling Go's race detector).
 It also needs a running Linux Podman/Docker engine for the isolated multicast
 suite. Ordinary Go tests and the loopback reference-server E2E suite do not need
-a container runtime or access to the developer's LAN.
+a container runtime or access to the developer's LAN. The independent server
+remains the locked, unmodified `aiosendspin[server]==10.2.1`.
 
 | Command | Purpose |
 | --- | --- |
@@ -106,9 +108,12 @@ private PipeWire/null-PCM/software-only scenarios and explicit marker-loopback o
 independent-server device opt-ins. Tests requiring real devices must skip before
 library/server/output/capture operations when the matching explicit ENV is absent;
 those skips do not count as hardware validation. Never run device/mixer-changing
-legacy appliance scripts as part of an ordinary software check. No hardware tests
-have been performed for this migration. Historical silence-only smoke results
-remain historical and cannot validate replacement backends.
+legacy appliance scripts as part of an ordinary software check. The separately
+recorded ALSA player E2E through WSL2 to a physical Creative PLAY! 3 is documented in
+[platform validation](platform-validation.md). That playback result does not
+measure physical synchronization or input timing, and is not Windows/macOS hardware
+acceptance. Historical silence-only smoke results remain historical and cannot
+validate replacement backends.
 
 ## Lint and formatting
 
@@ -131,8 +136,9 @@ control examples. `format:check` reuses formatting tasks. Root `format:go` cover
 all native packages and `internal/loopbackcmd`; dependency tidying runs separately
 for the root and each example module. The player is not a root Go tool. Its
 logging provider dependency is application-owned, not required by the SDK root.
-Both examples require SDK `v0.1.1` with a local `replace` to `../..` for unreleased
-APIs; no separate native-module requirement is needed.
+Both examples require SDK `v0.2.0` with a local `replace` to `../..` for checkout
+development. Published `v0.2.0` supplies these APIs without that replacement;
+no separate native-module requirement is needed.
 
 ## MISE file tasks
 
@@ -158,8 +164,9 @@ cannot be Americanized, and explicitly annotated cleanup error-channel joins mus
 not replace the primary cancellation/failure. Other cleanup return values are
 handled or explicitly discarded; correctness linters are not globally disabled.
 The workflow configures ordinary lint on Linux/Windows/macOS and separate purego
-native/backend checks. Configuration is not execution evidence: the new unpushed
-workflow has not run.
+native/backend checks. The [verified implementation CI run](https://github.com/echocat/sendspin-player-go/actions/runs/41034307574)
+passed all **27/27 jobs** at revision `084d704`. That execution evidence does not
+assert a pass for a later release commit.
 
 ## E2E boundaries
 
@@ -185,7 +192,7 @@ known null fields, direction errors, invalid activation and audio without a stre
 valid unknown extensions are accepted. The renderer uses an
 instrumented fake device. This is not a physical audio-output measurement.
 
-The unreleased [Source extension](source-input.md) uses deterministic fake Inputs
+The v0.2.0 [Source extension](source-input.md) uses deterministic fake Inputs
 with the unchanged server's native source role/decoder. It tests PCM16 upstream,
 ADC-time mapping including drift, lifecycle ordering, duplicate/pending starts,
 availability, role loss and reconnect, including explicit unpaired **source**
@@ -194,7 +201,8 @@ required; configuration, activation and reconnect alone never open capture. Thes
 tests do not measure native ADC timing or route captured input to local Output.
 
 [Host-managed player-control tests](external-player-control.md) exercise fake host
-targets, independent readback, bounded writes, cancellation and unity gain. They
+targets, independent readback, a bounded serialized FIFO without coalescing,
+cancellation/generation invalidation and immutable unity gain. They
 do not implement/test CEC, ALSA mixer access or HDMI/appliance policy. Non-nil
 PlayerControl, including fixed/no-controls, never pushes stored software values to
 hardware or falls back to software attenuation. Runtime SDK/backend logging uses
@@ -274,12 +282,14 @@ checks. The finite oracle suite does not replace hardware timing
 measurements. NTP integer arithmetic is fuzzed independently against `math/big`.
 
 CI defines pinned/stable Go jobs and reference E2E on Linux, Windows and macOS,
-bounded Linux fuzzing, and a separate Linux official-harness job. The new desktop
-backend matrix configures Linux/macOS/Windows on **amd64 and arm64**, with CGO-free
-ABI/software checks and visible skips for non-opted-in device scenarios. It has
-**not run** for this unpushed migration. Local test and cross-build results are
-limited to their exact source, host, target and command; a cross-build is not native
-execution, and earlier artifacts cannot satisfy a changed source fingerprint.
+bounded Linux fuzzing, and a separate Linux official-harness job. The desktop
+backend matrix covers Linux/macOS/Windows on **amd64 and arm64**, with CGO-free
+ABI/software checks and visible skips for non-opted-in device scenarios. All
+**27/27 jobs** passed for implementation revision `084d704` in the linked run;
+the release commit still needs its own validation. Local test and cross-build
+results are limited to their exact source, host, target and command; a cross-build
+is not native execution, and earlier artifacts cannot satisfy a changed source
+fingerprint.
 Managed test tasks record actual machine-readable execution evidence. The final
 CI traceability job collects it even after failures; see [the catalog/report
 workflow and its explicit limits](traceability.md). Run the full gate with
@@ -287,5 +297,6 @@ workflow and its explicit limits](traceability.md). Run the full gate with
 Project-specific outputs live in [the var tree](generated-files.md), the only
 entry in the root `.gitignore`. System temporary paths and shared tool caches
 retain their defaults; ordinary development tasks do not redirect them.
-Local implementation execution has been on Linux; no native Windows/macOS or
-physical hardware result is claimed for this WIP migration.
+Hosted native Windows/macOS software results do not establish hardware behavior.
+Physical timing, native Input hardware acceptance and independent cryptographic
+assurance remain open; `audit:check-conformance` intentionally stays blocked.

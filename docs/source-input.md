@@ -1,7 +1,8 @@
 # Opt-in source@v1 / audio input extension
 
-This unreleased SDK extension implements the **source** role in the same pinned
-Sendspin profile, not a private wire protocol and not a new specification version:
+SDK **v0.2.0** includes this opt-in extension implementing the **source** role in
+the same pinned Sendspin profile, not a private wire protocol and not a new
+specification version:
 
 - Specification `1.0.0-rc1`, revision
   `671a34d408581fc25ea56b3528a4a3f13e3be901`.
@@ -13,6 +14,9 @@ Sendspin profile, not a private wire protocol and not a new specification versio
   consumes the native decoded SourceStream; its optional wire probe only observes
   encrypted transport output/order. It does not replace protocol handling.
 
+SDK v0.2.0, core wire version `1` and the role version `source@v1` are separate
+version axes; the specification and independent-peer pins above are unchanged.
+
 The frozen primary player-profile inventory and its historical assessments are
 **not** enlarged or promoted by these tests. Source extension E2E tests have
 explicit supplemental dispositions in `rc1-requirements.json`. Existing historical
@@ -20,6 +24,8 @@ outside-scope notes are not a statement about this newly selected source profile
 Full source clause-by-clause audit, independent security acceptance and physical
 ADC/platform measurement remain separate work; passing fake-input tests does not
 certify hardware capture timing or all RC1 conformance.
+Native capture hardware has not been validated; software E2E success is not
+physical input/output synchronization evidence.
 
 ## API and privacy
 

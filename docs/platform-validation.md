@@ -19,6 +19,27 @@ and source input have separate opt-in requirements in the contract; playback
 consent never authorizes source capture. No default microphone, mixer or host
 audio routing change is part of these routes.
 
+### Recorded native ALSA player E2E
+
+The user ran the SDK's native ALSA player through the unchanged
+`aiosendspin[server]==10.2.1` peer on a Creative PLAY! 3 (`S3`, USB `041e:324d`)
+under WSL2 at revision `9b59888c05cc25906d7c8a21f6e9b0de1e753c0e`. The retained
+receipt is `var/platform-validation/play3-low-level/run-8LBYmfHE/e2e-report.json`;
+its reviewed summary is the adjacent `RESULT.md`. These private artifacts are
+not release assets; do not upload the test credentials or captured media.
+
+The 184.53-second functional scenario passed: PCM playback, stop/pause/resume,
+deliberate disconnect/reconnect, FLAC playback and final teardown. The receipt
+records 5,422 writes, 8,639,232 submitted frames, four flushes, two opens/two
+closes and zero unexpected output errors. Capture was never opened; the result
+was neither virtual output nor a private software graph.
+
+This is playback evidence for that exact earlier revision, not a hardware rerun
+of the v0.2.0 release commit. It does not establish absolute latency, calibrated
+synchronization/rate, analog stop/flush silence, click-free output, native Source
+capture, Windows/macOS hardware or host volume/mixer/CEC behavior. Frozen
+conformance assessments are unchanged.
+
 ## Historical silence-only probe evidence (retired)
 
 The former standalone probe opened output only with explicit `-run-silence`
