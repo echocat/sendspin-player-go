@@ -25,7 +25,7 @@ func (s *pinRefusingStore) Save(ctx context.Context, c Credentials) error {
 	return s.MemoryStore.Save(ctx, c)
 }
 
-func TestReferencePINCounterStoreFailuresDoNotRevealCredentials(t *testing.T) {
+func TestE2EReferencePINCounterStoreFailuresDoNotRevealCredentials(t *testing.T) {
 	for _, stage := range []string{"emit", "confirm"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -97,7 +97,7 @@ func TestReferencePINCounterStoreFailuresDoNotRevealCredentials(t *testing.T) {
 	}
 }
 
-func TestReferencePendingPINCancelDoesNotStartAttempt(t *testing.T) {
+func TestE2EReferencePendingPINCancelDoesNotStartAttempt(t *testing.T) {
 	c, ref, store, _ := codePairClient(t, "25519_ChaChaPoly_SHA256", "static_pairing_code")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

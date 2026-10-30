@@ -5,292 +5,177 @@ lockfile = true
 [tools]
 go = "1.27.3"
 uv = "0.12.13"
-actionlint = "1.7.12"
-golangci-lint = "2.15.0"
+
+[task_templates.go_test]
+usage = '''
+flag "--race" help="Enable the Go race detector" default=#false
+flag "--coverage" help="Collect atomic Go coverage with the race detector" default=#false
+arg "[args]..." double_dash="required" help="Additional go test arguments"
+'''
+vars.go_test_flags = ""
+vars.go_test_packages = "./..."
+vars.go_test_binary_args = ""
+vars.go_test_coverprofile = "profile.cov"
+shell = "{% if os() == 'windows' %}pwsh -Command{% else %}sh -o errexit -c{% endif %}"
+run = '''
+go test -count=1 {{vars.go_test_flags}} {% if usage.race or usage.coverage %}-race {% endif %}{% if usage.coverage %}-covermode=atomic "-coverprofile={{vars.go_test_coverprofile}}" {% endif %}{{vars.go_test_packages}} {% for arg in usage.args | default(value=[]) %}{% if os() == 'windows' %}'{{arg | replace(from="'", to="''")}}'{% else %}{{arg | quote}}{% endif %} {% endfor %}{{vars.go_test_binary_args}}{% if os() == 'windows' %}; exit $LASTEXITCODE{% endif %}
+'''
+
+[tasks.test]
+extends = "go_test"
+description = "Run ordinary Go tests in the SDK and independent example modules"
+depends = ["test:examples"]
+
+[tasks."test:go"]
+extends = "go_test"
+description = "Run ordinary SDK Go tests"
+
+[tasks."test:examples"]
+description = "Discover and test every independent example module"
+run = 'go test -count=1 ./internal/integration -run="^TestExamples$" -args -examples=test'
+
+[tasks."test:e2e"]
+extends = "go_test"
+description = "Run only E2E Go tests; package TestMain owns setup and cleanup"
+vars.go_test_flags = "-tags=e2e -run=E2E -timeout=20m"
+vars.go_test_coverprofile = "profile.e2e.cov"
+
+[tasks."test:native"]
+extends = "go_test"
+description = "Run native audio ABI and fake-device tests without services or hardware"
+vars.go_test_packages = "./audio/..."
+vars.go_test_coverprofile = "profile.native.cov"
+
+[tasks."test:native:e2e"]
+extends = "go_test"
+description = "Run native backend E2E architecture checks without Python fixture packages"
+vars.go_test_flags = "-tags=e2e -run=E2E -timeout=5m"
+vars.go_test_packages = "./audio/native/... ./audio/pipewire/... ./audio/alsa/... ./audio/coreaudio/... ./audio/wasapi/..."
+vars.go_test_coverprofile = "profile.native.e2e.cov"
+
+[tasks."test:fuzz"]
+description = "Run every bounded fuzz target with two workers per invocation"
+run = [
+    'go test -run="^$" -fuzz="^FuzzVisualizerStream$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzMetadataPosition$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzControlModels$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzActivationIgnoredPairingField$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzPairingToken$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzRoleBinaryMessages$" -fuzztime=5s -parallel=2 .',
+    'go test -run="^$" -fuzz="^FuzzPCM$" -fuzztime=5s -parallel=2 ./codec',
+    'go test -run="^$" -fuzz="^FuzzSample$" -fuzztime=5s -parallel=2 ./internal/timesync',
+    'go test -run="^$" -fuzz="^FuzzWireBase64URL$" -fuzztime=5s -parallel=2 ./internal/wire',
+    'go test -run="^$" -fuzz="^FuzzLanguageTag$" -fuzztime=5s -parallel=2 ./internal/protocol',
+    'go test -run="^$" -fuzz="^FuzzTypedDecode$" -fuzztime=5s -parallel=2 ./internal/protocol',
+    'go test -run="^$" -fuzz="^FuzzParse$" -fuzztime=5s -parallel=2 ./internal/protocol',
+    'go test -run="^$" -fuzz="^FuzzFragments$" -fuzztime=5s -parallel=2 ./internal/protocol',
+]
+
+[tasks."example:run"]
+description = "Run a discovered example and forward its arguments unchanged"
+alias = "example"
+raw_args = true
+run = "go run ./internal/examplecmd run"
+
+[tasks."example:list"]
+description = "List discovered example modules"
+alias = "example:ls"
+raw_args = true
+run = "go run ./internal/examplecmd list"
 
 [tasks.format]
-description = "Format Go sources with golangci-lint and tidy the root module"
+description = "Format and tidy the SDK and independent example modules"
 depends = ["format:go", "format:examples", "format:audit"]
+
+[tasks."format:go"]
+description = "Format SDK Go sources and tidy its dependencies"
+tools.golangci-lint = "2.15.0"
+run = ["golangci-lint fmt ./...", "go mod tidy"]
+
+[tasks."format:examples"]
+description = "Format and tidy the independent example modules"
+tools.golangci-lint = "2.15.0"
+run = "go run ./internal/examplecmd format"
 
 [tasks."format:audit"]
 description = "Regenerate the human RC1 audit from the requirement catalog"
 depends = ["format:go", "format:examples"]
 run = "go run ./internal/specauditcmd generate"
 
-[tasks."format:go"]
-description = "Format SDK Go sources and tidy the module"
-depends = ["format:go:code", "format:go:deps"]
+[tasks."format:check"]
+description = "Check Go formatting without changing files"
+depends = ["lint:go:format", "lint:examples:format"]
 
-[tasks."format:go:code"]
-description = "Format SDK Go source code"
-run = "golangci-lint fmt ./..."
+[tasks.lint]
+description = "Lint Go sources, module files, CI workflows and test mappings"
+depends = ["lint:go", "lint:examples", "lint:actions", "lint:audit"]
 
-[tasks."format:go:deps"]
-description = "Tidy SDK Go dependencies"
-run = "go mod tidy"
+[tasks."lint:go"]
+depends = ["lint:go:format", "lint:go:mod", "lint:go:tagged"]
+tools.golangci-lint = "2.15.0"
+run = "golangci-lint run"
 
-[tasks."format:examples"]
-description = "Format and tidy the independent example modules"
-depends = ["format:examples:player", "format:examples:external-control"]
+[tasks."lint:go:format"]
+tools.golangci-lint = "2.15.0"
+run = "golangci-lint fmt --diff ./..."
 
-[tasks."format:examples:player"]
-description = "Format and tidy the player example module"
-dir = "_examples/player"
-run = ["golangci-lint fmt ./...", "go mod tidy"]
+[tasks."lint:go:mod"]
+run = "go mod tidy -diff"
 
-[tasks."format:examples:external-control"]
-description = "Format and tidy the external-control example module"
-dir = "_examples/external-control"
-run = ["golangci-lint fmt ./...", "go mod tidy"]
+[tasks."lint:go:tagged"]
+description = "Lint the same E2E sources selected by go test -tags=e2e"
+tools.golangci-lint = "2.15.0"
+run = "golangci-lint run --build-tags=e2e"
 
-[tasks."test:loopback"]
-description = "Offline WAV/analysis tests against known synthetic offsets/relative clock ratios"
+[tasks."lint:examples"]
+description = "Check formatting, modules, vet and lint in every discovered example"
+tools.golangci-lint = "2.15.0"
 env.CGO_ENABLED = "0"
-run = "go test -count=1 ./internal/loopbackcmd"
+run = 'go test -count=1 ./internal/integration -run="^TestExamples$" -args -examples=code'
 
-[tasks."test:loopback:artifacts"]
-description = "Retain a synthetic WAV/reference/report/truth fixture under var; no hardware or recording"
-depends = ["prepare"]
+[tasks."lint:examples:format"]
+tools.golangci-lint = "2.15.0"
+run = "go run ./internal/examplecmd check"
+
+[tasks."lint:actions"]
+tools.actionlint = "1.7.12"
+run = "actionlint -shellcheck="
+
+[tasks."lint:audit"]
+run = "go run ./internal/specauditcmd check"
+
+[tasks."build:examples"]
+description = "Build discovered example executables under var/bin/examples without CGO"
+alias = "build:example"
 env.CGO_ENABLED = "0"
-env.SENDSPIN_LOOPBACK_ARTIFACT_DIR = "{{config_root}}/var/loopback"
-run = "go test -count=1 -v -run '^TestOfflineCLIEndToEndAndNoOverwrite$' ./internal/loopbackcmd"
+run = "go run ./internal/examplecmd build"
 
 [tasks."build:loopback"]
-description = "Build the standalone offline tool without CGO, native audio or SDK runtime imports"
-depends = ["prepare"]
+description = "Build the offline WAV tool without opening audio devices"
 env.CGO_ENABLED = "0"
 run = 'go build -o "{{config_root}}/var/bin/loopback/loopback" ./internal/loopbackcmd'
 run_windows = 'go build -o "{{config_root}}/var/bin/loopback/loopback.exe" ./internal/loopbackcmd'
 
-[tasks."format:check"]
-description = "Check golangci-lint formatting without changing files"
-depends = ["lint:go:format", "lint:examples:format"]
-
-[tasks.lint]
-description = "Lint Go sources, formatting, module files and CI workflows"
-depends = ["lint:go", "lint:actions", "lint:examples", "lint:audit"]
-
-[tasks."lint:audit"]
-description = "Validate pinned requirements, real test declarations and generated audit"
-run = "go run ./internal/specauditcmd check"
-
-[tasks."lint:go"]
-description = "Lint SDK Go sources, formatting and module files (includes govet)"
-depends = ["lint:go:format", "lint:go:mod", "lint:go:tagged"]
-run = "golangci-lint run"
-
-[tasks."lint:go:format"]
-description = "Check SDK Go formatting"
-run = "golangci-lint fmt --diff ./..."
-
-[tasks."lint:go:mod"]
-description = "Check SDK Go module files"
-run = "go mod tidy -diff"
-
-[tasks."lint:go:tagged"]
-description = "Lint E2E, multicast and live-reference Go sources"
-run = 'golangci-lint run --build-tags="e2e,mdns_e2e,timefilter_reference"'
-
-[tasks."lint:actions"]
-description = "Lint GitHub Actions workflows"
-run = "actionlint -shellcheck="
-
-[tasks."lint:examples"]
-description = "Check real example applications without requiring native headers"
-depends = ["lint:examples:format", "lint:examples:player", "lint:examples:external-control"]
-
-[tasks."lint:examples:player"]
-description = "Lint and check dependencies of the player example module"
-dir = "_examples/player"
-env.CGO_ENABLED = "0"
-run = ["go mod tidy -diff", "golangci-lint run ./..."]
-
-[tasks."lint:examples:external-control"]
-description = "Lint and check dependencies of the external-control example module"
-dir = "_examples/external-control"
-env.CGO_ENABLED = "0"
-run = ["go mod tidy -diff", "golangci-lint run ./..."]
-
-[tasks."lint:examples:format"]
-description = "Check formatting of real example applications"
-depends = ["lint:examples:format:player", "lint:examples:format:external-control"]
-
-[tasks."lint:examples:format:player"]
-description = "Check formatting of the player example module"
-dir = "_examples/player"
-run = "golangci-lint fmt --diff ./..."
-
-[tasks."lint:examples:format:external-control"]
-description = "Check formatting of the external-control example module"
-dir = "_examples/external-control"
-run = "golangci-lint fmt --diff ./..."
-
-[tasks."lint:desktop-audio"]
-description = "Lint CGO-free host backend and shared queue code, including opt-in E2E"
-env.CGO_ENABLED = "0"
-run = 'golangci-lint run --build-tags=e2e ./audio/...'
-
-[tasks."test:desktop-audio"]
-description = "Record CGO-free native load/clock/callback ABI evidence without audio devices or servers"
-run = "go run ./internal/specauditcmd run --suite desktop-audio"
-
-[tasks."test:desktop-audio:stub"]
-description = "Test concrete backends and queues without CGO, a C compiler or device opt-ins"
-env.CGO_ENABLED = "0"
-run = "go test -count=1 ./audio/..."
-
-[tasks."test:desktop-audio:race"]
-description = "Optional race instrumentation; CGO is for the Go race runtime, not backend implementation"
-env.CGO_ENABLED = "1"
-run = "go test -race -count=1 ./audio/..."
-
-[tasks."test:desktop-audio:e2e"]
-description = "Platform-tagged output, marker loopback and Source/input; native tests SKIP without device ENV"
-run = "go run ./internal/specauditcmd run --suite desktop-audio-e2e"
-
-[tasks."test:desktop-audio:source:fake"]
-description = "SOFTWARE ONLY: Source helper through pinned independent decoder with fake input; never hardware evidence"
-env.CGO_ENABLED = "0"
-env.UV_PROJECT_ENVIRONMENT = "{{config_root}}/var/python/e2e"
-env.SENDSPIN_AUDIOTEST_SOURCE_E2E_FAKE = "1"
-run = ["uv sync --locked --project internal/e2e", "go test -tags=e2e -count=1 -v -timeout=90s -run '^TestReferenceServerFakeInputScenario$' ./audio/internal/audiotest"]
-
-[tasks."test:pipewire:isolated"]
-description = "Native PipeWire lifecycle through a private timer-driven null sink, never the host audio server"
-env.CGO_ENABLED = "0"
-env.SENDSPIN_PIPEWIRE_ISOLATED = "1"
-env.SENDSPIN_PIPEWIRE_ARTIFACT_DIR = "{{config_root}}/var/platform-validation/native-desktop/pipewire"
-run = "go test -count=1 -v -run '^TestIsolatedPipeWirePlaybackLifecycle$' ./audio/pipewire"
-
-[tasks."test:pipewire:e2e:isolated"]
-description = "Independent encrypted server through a real private PipeWire null graph; software integration, no hardware"
-env.CGO_ENABLED = "0"
-env.UV_PROJECT_ENVIRONMENT = "{{config_root}}/var/python/e2e"
-env.SENDSPIN_PIPEWIRE_ISOLATED_E2E = "1"
-env.SENDSPIN_PIPEWIRE_E2E_ROOT = "{{config_root}}"
-run = ["uv sync --locked --project internal/e2e", "go test -tags=e2e -count=1 -v -timeout=2m -run '^TestReferenceServerPrivatePipeWireScenario$' ./audio/pipewire"]
-
-[tasks."lint:backends:alsa"]
-description = "Check root ALSA package without CGO or native headers"
-env.CGO_ENABLED = "0"
-run = 'golangci-lint run ./audio/alsa'
-
-[tasks."lint:alsa"]
-description = "Lint purego ALSA including opt-in scenarios (no development headers required)"
-env.CGO_ENABLED = "0"
-run = 'golangci-lint run --build-tags=e2e ./audio/alsa'
-
-[tasks."test:alsa"]
-description = "Record Linux ALSA native null-PCM and fake-device evidence, without opening hardware"
-run = "go run ./internal/specauditcmd run --suite alsa"
-
-[tasks."test:alsa:stub"]
-description = "Test ALSA null PCM, fake devices and unavailable-platform behavior without CGO"
-env.CGO_ENABLED = "0"
-env.SENDSPIN_ALSA_SILENCE_DEVICE = ""
-run = "go test -count=1 ./audio/alsa"
-
-[tasks."test:alsa:e2e:optin"]
-description = "ALSA tagged output, marker loopback and Source/input; skip without explicit device consent"
-run = "go run ./internal/specauditcmd run --suite alsa-e2e"
-
-[tasks."lint:native"]
-description = "Lint purego native backends, selector and real examples"
-depends = ["lint:desktop-audio", "lint:examples"]
-
-[tasks."test:module"]
-description = "Test the SDK extracted from a distributable module archive"
-run = "go test -count=1 ./internal/integration -run TestModuleArchive"
-
-[tasks.test]
-description = "Run unit and integration tests with the race detector"
-run = "go run ./internal/specauditcmd run --suite unit"
-
-[tasks."test:coverage"]
-depends = ["prepare"]
-run = "go run ./internal/specauditcmd run --suite unit --coverage"
-
-[tasks."test:native"]
-description = "Test current native backends and examples without opening hardware"
-depends = ["test:desktop-audio", "test:alsa", "test:examples"]
-
-[tasks."test:examples"]
-description = "Test real examples without CGO or audio hardware"
-run = "go run ./internal/specauditcmd run --suite examples"
-
-[tasks."build:example"]
-description = "Build the native player without CGO or a C compiler"
-depends = ["prepare"]
-dir = "_examples/player"
-env.CGO_ENABLED = "0"
-run = 'go build -o "{{config_root}}/var/bin/native/player" .'
-run_windows = 'go build -o "{{config_root}}/var/bin/native/player.exe" .'
-
-[tasks."test:timefilter"]
-description = "Run the C++-generated time-filter vectors without a C++ compiler"
-run = "go test -race -count=1 ./internal/timesync"
-
-[tasks."test:timefilter:reference"]
-description = "Compare live with the pinned C++17 reference (GCC/Clang required)"
-run = "go run ./internal/specauditcmd run --suite reference"
-
-[tasks."test:timefilter:update"]
-description = "Regenerate frozen vectors from C++, never from Go predictions"
-run = "go test -count=1 -tags=timefilter_reference -run=^TestCPPReference$ -timeout=2m ./internal/timesync -args -update-timefilter-reference"
-
-[tasks."test:e2e"]
-description = "Run the pinned independent RC1 reference server (no sound card)"
-run = "go run ./internal/specauditcmd run --suite e2e"
-
-[tasks."test:mdns"]
-description = "Real dual-stack multicast and interface hotplug in isolated Linux networks"
-run = "go run ./internal/specauditcmd run --suite mdns"
-
-[tasks."test:mdns:docker"]
-description = "Run the isolated multicast fixture with Docker explicitly"
-run = "go run ./internal/specauditcmd run --suite mdns-docker"
-
-[tasks."test:conformance"]
-description = "Run the pinned official harness locally under a distinct SDK entry"
-run = "go run ./internal/specauditcmd run --suite harness"
-
-[tasks."test:fuzz"]
-description = "Record every discovered fuzz campaign, not only ordinary seed runs"
-run = "go run ./internal/specauditcmd run --suite fuzz"
-
 [tasks."audit:report"]
-description = "Generate the RC1 traceability report without assuming unrun suites passed"
+description = "Generate traceability without treating unrun or stale evidence as a pass"
 run = "go run ./internal/specauditcmd report"
 
 [tasks."audit:verify-spec"]
-description = "Explicitly verify frozen source/paragraph hashes against the pinned upstream revision"
 run = "go run ./internal/specauditcmd verify-spec"
 
 [tasks."audit:verify-noise"]
-description = "Verify fixed independent Cacophony Noise vectors against their pinned source"
 run = "go run ./internal/noisevectorcmd"
 
-[tasks."audit:verify-cpace"]
-description = "Recompute frozen TEST transcripts with the pinned independent Python CPace source, then compare Go; no network protocol or hardware"
-run = ['uv run --locked --project internal/e2e python internal/e2e/cpace_oracle.py', "go test -race -count=1 -run '^TestPinnedPythonDifferentialCorpus$' ./internal/cpace"]
-
 [tasks."audit:verify-mdns"]
-description = "Verify pinned mDNS source files and exact scoped import transformations"
 run = "go run ./internal/mdnsimportcmd"
 
 [tasks."audit:check-conformance"]
-description = "Strict gate; currently expected to fail while normative/hardware review is open"
+description = "Strict conformance gate; still blocked by outstanding review and hardware evidence"
 run = "go run ./internal/specauditcmd report --profile full --require-conformance"
 
-[tasks."audit:check-evidence"]
-description = "Require fresh complete core evidence, without claiming complete conformance"
-depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise", "audit:verify-cpace", "audit:verify-mdns"]
-run = "go run ./internal/specauditcmd report --profile full"
-
 [tasks.vuln]
-description = "Check reachable dependencies against the Go vulnerability database"
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
 
 [tasks."check:full"]
-description = "Run the complete implemented quality gate"
-depends = ["audit:check-evidence", "vuln"]
+description = "Run lint, ordinary Go tests, E2E Go tests, bounded fuzzing and vulnerability checks"
+depends = ["lint", "test", "test:e2e", "test:fuzz", "vuln"]

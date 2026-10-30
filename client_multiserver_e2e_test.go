@@ -30,7 +30,7 @@ func referenceEventCount(t *testing.T, ref referenceServer, kind, reason string)
 	return count
 }
 
-func TestReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T) {
+func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cred, err := NewCredentials()
@@ -88,7 +88,7 @@ func TestReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T) {
 	eventually(t, func() bool { return client.Snapshot().ServerID == playback.id && client.Snapshot().Available })
 }
 
-func TestReferenceMultiServerArbitration(t *testing.T) {
+func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                               string
 		initialPlayback, candidatePlayback, preferCandidate, wantCandidate bool
@@ -155,7 +155,7 @@ func TestReferenceMultiServerArbitration(t *testing.T) {
 	}
 }
 
-func TestReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
+func TestE2EReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -190,7 +190,7 @@ func TestReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
 	eventually(t, func() bool { return client.Snapshot().ServerID == playback.id && client.Snapshot().Available })
 }
 
-func TestReferenceIncomingPairingDoesNotInterruptPlayback(t *testing.T) {
+func TestE2EReferenceIncomingPairingDoesNotInterruptPlayback(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -232,7 +232,7 @@ func TestReferenceIncomingPairingDoesNotInterruptPlayback(t *testing.T) {
 	}
 }
 
-func TestReferenceMisbindingCannotDisplaceAnAdmittedServer(t *testing.T) {
+func TestE2EReferenceMisbindingCannotDisplaceAnAdmittedServer(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -314,7 +314,7 @@ func (d *handoffDevice) Close() error {
 	return err
 }
 
-func TestReferencePlaybackHandoffClosesThePreviousOutput(t *testing.T) {
+func TestE2EReferencePlaybackHandoffClosesThePreviousOutput(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -357,7 +357,7 @@ func TestReferencePlaybackHandoffClosesThePreviousOutput(t *testing.T) {
 	}
 }
 
-func TestReferenceProvisionalConnectionLimitPreservesTheHolder(t *testing.T) {
+func TestE2EReferenceProvisionalConnectionLimitPreservesTheHolder(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {

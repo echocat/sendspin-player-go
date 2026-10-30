@@ -1,3 +1,5 @@
+//go:build e2e
+
 package integration
 
 import (
@@ -76,7 +78,7 @@ func trackedArchiveFiles(parent context.Context, root string) ([]modzip.File, er
 	return files, nil
 }
 
-func TestTrackedArchiveExcludesGeneratedAndUntrackedFilesWithoutModuleMarker(t *testing.T) {
+func TestE2ETrackedArchiveExcludesGeneratedAndUntrackedFilesWithoutModuleMarker(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
@@ -105,6 +107,7 @@ func TestTrackedArchiveExcludesGeneratedAndUntrackedFilesWithoutModuleMarker(t *
 	write("_examples/player/go.mod", "module example.test/player\n")
 	write("_examples/player/main.go", "package main\nfunc main(){}\n")
 	write("internal/e2e/fixture.py", "# versioned reference harness, no Go module marker\n")
+	write("internal/e2etest/helper.go", "package e2etest\n")
 	write("internal/conformancetest/fixture.py", "# versioned conformance harness, no Go module marker\n")
 	git("init", "--quiet")
 	git("add", "--", "go.mod", ".gitignore", "sdk.go", "_examples", "internal")
@@ -127,19 +130,19 @@ func TestTrackedArchiveExcludesGeneratedAndUntrackedFilesWithoutModuleMarker(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.File) != 3 {
+	if len(r.File) != 4 {
 		t.Fatal("archive contains non-source artifacts", r.File)
 	}
 	for _, entry := range r.File {
 		name := strings.TrimPrefix(entry.Name, m.Path+"@"+m.Version+"/")
-		if name != "sdk.go" && name != "go.mod" && name != ".gitignore" {
+		if name != "sdk.go" && name != "go.mod" && name != ".gitignore" && name != "internal/e2etest/helper.go" {
 			t.Fatal("private/generated/harness data entered archive", name)
 		}
 	}
 	cmd := exec.Command("go", "list", "./...")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOWORK=off")
-	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "example.test/archive" {
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "example.test/archive\nexample.test/archive/internal/e2etest" {
 		t.Fatalf("ignore var did not protect package discovery: %v\n%s", err, out)
 	}
 	git("add", "--force", "--", "var/FAKE-private-test-data.json")

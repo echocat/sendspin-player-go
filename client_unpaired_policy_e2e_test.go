@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestReferenceUnpairedPolicyIsAdvertisedAndNotRemotelyMutable(t *testing.T) {
+func TestE2EReferenceUnpairedPolicyIsAdvertisedAndNotRemotelyMutable(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		name := "disabled"
 		if enabled {

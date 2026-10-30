@@ -16,7 +16,7 @@ import (
 // Concrete logging belongs to the test executable, never the SDK runtime.
 func TestMain(m *testing.M) {
 	restore := recording.NewProvider().HookGlobally()
-	result := m.Run()
+	result := runPackageTests(m)
 	restore()
 	os.Exit(result)
 }

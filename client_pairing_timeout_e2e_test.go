@@ -17,7 +17,7 @@ import (
 	"github.com/flynn/noise"
 )
 
-func TestReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
+func TestE2EReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
 	requirePairInitIndex(t, reference, 1, 2)
 }
 
-func TestReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
+func TestE2EReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
 	// that late key nor delete unrelated records; later repair uses Sentinel.
 }
 
-func TestReferencePairingStoreDeadlineAbortsWithoutActorTimer(t *testing.T) {
+func TestE2EReferencePairingStoreDeadlineAbortsWithoutActorTimer(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)

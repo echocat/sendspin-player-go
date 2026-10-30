@@ -50,7 +50,7 @@ func controlEvents(t *testing.T, ref referenceServer, kind string) []map[string]
 	return events
 }
 
-func TestReferenceStaticTimingHintsSurviveReadinessAndAvailabilityChanges(t *testing.T) {
+func TestE2EReferenceStaticTimingHintsSurviveReadinessAndAvailabilityChanges(t *testing.T) {
 	client, ref, _, _ := referenceControlClient(t)
 	// Observe actual decrypted client/state at the independently implemented
 	// peer. Reference acceptance alone would not assert the emitted values.
@@ -87,7 +87,7 @@ func TestReferenceStaticTimingHintsSurviveReadinessAndAvailabilityChanges(t *tes
 	}
 }
 
-func TestReferencePlayerCommandsClampPersistAndEchoCompleteState(t *testing.T) {
+func TestE2EReferencePlayerCommandsClampPersistAndEchoCompleteState(t *testing.T) {
 	client, ref, store, _ := referenceControlClient(t)
 	if err := client.SetAvailable(context.Background(), false); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func expectedControllerFields(command Command) map[string]any {
 	return fields
 }
 
-func TestReferenceAllControllerCommandsUseLatestStateAndExactArguments(t *testing.T) {
+func TestE2EReferenceAllControllerCommandsUseLatestStateAndExactArguments(t *testing.T) {
 	client, ref, _, _ := referenceControlClient(t)
 	mediaCommand(t, client, ref, map[string]any{"command": "controller", "commands": controllerCommands, "seek_max_ms": int64(math.MaxInt64), "repeat": "all", "shuffle": true})
 	state := client.Snapshot().Controller
@@ -271,7 +271,7 @@ func TestReferenceAllControllerCommandsUseLatestStateAndExactArguments(t *testin
 	}
 }
 
-func TestReferenceMalformedPlayerCommandsCloseWithoutPersistenceOrEcho(t *testing.T) {
+func TestE2EReferenceMalformedPlayerCommandsCloseWithoutPersistenceOrEcho(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		command map[string]any
@@ -302,7 +302,7 @@ func TestReferenceMalformedPlayerCommandsCloseWithoutPersistenceOrEcho(t *testin
 	}
 }
 
-func TestReferenceMalformedControllerStatesCloseSilently(t *testing.T) {
+func TestE2EReferenceMalformedControllerStatesCloseSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		patch  map[string]any

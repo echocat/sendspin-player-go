@@ -5,10 +5,80 @@ Never retain/log PSKs, handshake data, or full pairing message bodies here.
 """
 
 import asyncio
+from contextvars import ContextVar
 import json
 
 from aiohttp import WSMsgType
 from aiosendspin.noise.wire import EncryptedWebSocket
+
+
+class TransportScope:
+    """One peer, captured on the transport itself, never routed by client ID."""
+
+    def __init__(self):
+        self.pairing = None
+        self.source = None
+        self.artwork = None
+        self.tasks = set()
+
+
+current_scope = ContextVar("e2e_transport_scope", default=None)
+_init = EncryptedWebSocket.__init__
+_receive = EncryptedWebSocket.receive
+_receive_timed = EncryptedWebSocket.receive_timed
+_send_str = EncryptedWebSocket.send_str
+_send_bytes = EncryptedWebSocket.send_bytes
+
+
+def _scoped_init(transport, *args, **kwargs):
+    _init(transport, *args, **kwargs)
+    transport._e2e_scope = current_scope.get()
+
+
+def _observe(transport, result):
+    scope = transport._e2e_scope
+    if scope is not None:
+        for observer in (scope.pairing, scope.source):
+            if observer is not None:
+                observer.observe(result)
+
+
+async def _scoped_receive(transport):
+    result = await _receive(transport)
+    _observe(transport, result)
+    return result
+
+
+async def _scoped_receive_timed(transport, clock):
+    result, at = await _receive_timed(transport, clock)
+    _observe(transport, result)
+    return result, at
+
+
+async def _scoped_send_str(transport, data):
+    scope = transport._e2e_scope
+    if scope is not None and scope.pairing is not None:
+        await scope.pairing.send_str(transport, data)
+    else:
+        await _send_str(transport, data)
+    if scope is not None and scope.artwork is not None:
+        scope.artwork.observe_str(data)
+
+
+async def _scoped_send_bytes(transport, data):
+    await _send_bytes(transport, data)
+    scope = transport._e2e_scope
+    if scope is not None and scope.artwork is not None:
+        await scope.artwork.observe_bytes(transport, data)
+
+
+# Installed once for this manager process. Closing one peer never restores or
+# stacks global methods belonging to another peer.
+EncryptedWebSocket.__init__ = _scoped_init
+EncryptedWebSocket.receive = _scoped_receive
+EncryptedWebSocket.receive_timed = _scoped_receive_timed
+EncryptedWebSocket.send_str = _scoped_send_str
+EncryptedWebSocket.send_bytes = _scoped_send_bytes
 
 
 class PairingObserver:
@@ -25,59 +95,34 @@ class PairingObserver:
         self.followup_gate = asyncio.Event()
         if not hold_followup:
             self.followup_gate.set()
-        self._receive = EncryptedWebSocket.receive
-        self._receive_timed = EncryptedWebSocket.receive_timed
-        self._send_str = EncryptedWebSocket.send_str
+        self.scope = current_scope.get()
+        self.scope.pairing = self
 
-        async def receive(transport):
-            result = await self._receive(transport)
-            self.observe(result)
-            return result
-
-        async def receive_timed(transport, clock):
-            result, at = await self._receive_timed(transport, clock)
-            self.observe(result)
-            return result, at
-
-        async def send_str(transport, data):
-            if self.initial_hello is not None and '"server/hello"' in data:
-                message = json.loads(data)
-                if message.get("type") == "server/hello":
-                    data = json.dumps({"type": "server/hello", "payload": self.initial_hello})
-                    self.initial_hello = None
-            if '"server/activate"' in data:
-                message = json.loads(data)
-                if message.get("type") == "server/activate":
-                    # Explicit malformed/unsupported-peer fixture, not normal
-                    # reference behavior. Replacement is still encrypted by
-                    # the real reference transport, never sent in cleartext.
-                    replacement = self.initial_activation
-                    if replacement is None and self.pairing_activation is not None:
-                        if "pairing" in message["payload"]["activities"]:
-                            replacement = self.pairing_activation
-                            self.pairing_activation = None
-                    if replacement is not None:
-                        data = json.dumps({"type": "server/activate", "payload": replacement})
-                        # A retry in an admission-lock fixture must not become
-                        # a valid contender after its one injected refusal.
-                        # Other protocol-fault scenarios remain one-shot.
-                        if not self.repeat_initial_activation:
-                            self.initial_activation = None
-                        self.replaced_activation = True
-                    elif self.replaced_activation:
-                        # Exercise the client's discard window immediately
-                        # before the native cancelling activation closes it.
-                        # These fault messages use the same serialized writer
-                        # and real Noise transport, with no compliance bypass.
-                        for stale in self.stale_messages or ():
-                            await self._send_str(transport, json.dumps(stale))
-                        self.stale_messages = None
-                        await self.followup_gate.wait()
-            await self._send_str(transport, data)
-
-        EncryptedWebSocket.receive = receive
-        EncryptedWebSocket.receive_timed = receive_timed
-        EncryptedWebSocket.send_str = send_str
+    async def send_str(self, transport, data):
+        if self.initial_hello is not None and '"server/hello"' in data:
+            message = json.loads(data)
+            if message.get("type") == "server/hello":
+                data = json.dumps({"type": "server/hello", "payload": self.initial_hello})
+                self.initial_hello = None
+        if '"server/activate"' in data:
+            message = json.loads(data)
+            if message.get("type") == "server/activate":
+                replacement = self.initial_activation
+                if replacement is None and self.pairing_activation is not None:
+                    if "pairing" in message["payload"]["activities"]:
+                        replacement = self.pairing_activation
+                        self.pairing_activation = None
+                if replacement is not None:
+                    data = json.dumps({"type": "server/activate", "payload": replacement})
+                    if not self.repeat_initial_activation:
+                        self.initial_activation = None
+                    self.replaced_activation = True
+                elif self.replaced_activation:
+                    for stale in self.stale_messages or ():
+                        await _send_str(transport, json.dumps(stale))
+                    self.stale_messages = None
+                    await self.followup_gate.wait()
+        await _send_str(transport, data)
 
     def observe(self, result):
         if result.type is not WSMsgType.TEXT:
@@ -161,6 +206,4 @@ class PairingObserver:
 
     def close(self):
         self.followup_gate.set()
-        EncryptedWebSocket.receive = self._receive
-        EncryptedWebSocket.receive_timed = self._receive_timed
-        EncryptedWebSocket.send_str = self._send_str
+        self.scope.pairing = None

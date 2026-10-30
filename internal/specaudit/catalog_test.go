@@ -94,6 +94,18 @@ func TestRealCatalogAndGeneratedAudit(t *testing.T) {
 	if p.TemplateInventory == nil || len(p.TemplateInventory.Clauses) != 34 {
 		t.Fatal("supplemental template inventory disappeared")
 	}
+	for _, name := range []string{"TestE2EReferenceWeakProducerLifecycleAndLimits", "TestE2EReferenceWeakProducerRejectsInvalidSources"} {
+		id := TestID("e2e", "github.com/echocat/sendspin-player-go", name)
+		if test, ok := p.Inventory.Tests[id]; !ok || test.File != "client_weak_e2e_test.go" {
+			t.Fatal("supplemental weak producer test lost its real Go declaration", id)
+		}
+		if !slices.ContainsFunc(p.Catalog.UnmappedTests, func(g Gap) bool { return g.ID == id && g.Reason != "" }) {
+			t.Fatal("supplemental weak producer test needs an explicit unmapped disposition", id)
+		}
+		if slices.ContainsFunc(p.Catalog.Evidence, func(e Evidence) bool { return e.ID == id }) {
+			t.Fatal("supplemental weak producer regression became primary evidence", id)
+		}
+	}
 }
 
 func TestCatalogRejectsBrokenLinksAndMissingMappings(t *testing.T) {
@@ -124,7 +136,7 @@ func TestCatalogRejectsBrokenLinksAndMissingMappings(t *testing.T) {
 				put(t, p.Root, "other_test.go", "package audit\nimport \"testing\"\nfunc TestOther(t *testing.T) {}\n")
 				catalog.Evidence = append(catalog.Evidence, Evidence{ID: TestID("unit", "example.test/audit", "TestOther"), Suite: "unit", Package: "example.test/audit", Test: "TestOther"})
 			case "unmapped-e2e":
-				put(t, p.Root, "peer_test.go", "//go:build e2e\n\npackage audit\nimport \"testing\"\nfunc TestPeer(t *testing.T) {}\n")
+				put(t, p.Root, "peer_test.go", "//go:build e2e\n\npackage audit\nimport \"testing\"\nfunc TestE2EPeer(t *testing.T) {}\n")
 			case "seed-is-not-fuzz":
 				put(t, p.Root, "fuzz_test.go", "package audit\nimport \"testing\"\nfunc FuzzPayload(f *testing.F) {}\n")
 				catalog.Evidence[0] = Evidence{ID: TestID("unit", "example.test/audit", "FuzzPayload"), Suite: "unit", Package: "example.test/audit", Test: "FuzzPayload"}
@@ -179,8 +191,8 @@ func TestCatalogRejectsDuplicateKeysUnknownFieldsAndChangedIndex(t *testing.T) {
 
 func TestUnmappedPeerNeedsAnExplicitDisposition(t *testing.T) {
 	p := fixture(t)
-	put(t, p.Root, "peer_test.go", "//go:build mdns_e2e && e2e\n\npackage audit\nimport \"testing\"\nfunc TestPeer(t *testing.T) {}\n")
-	p.Catalog.UnmappedTests = []Gap{{ID: TestID("mdns", "example.test/audit", "TestPeer"), Reason: "Synthetic test not claimed as normative evidence"}}
+	put(t, p.Root, "internal/mdnstest/peer_test.go", "//go:build e2e\n\npackage mdnstest\nimport \"testing\"\nfunc TestE2EMDNSPeer(t *testing.T) {}\n")
+	p.Catalog.UnmappedTests = []Gap{{ID: TestID("mdns", "example.test/audit/internal/mdnstest", "TestE2EMDNSPeer"), Reason: "Synthetic test not claimed as normative evidence"}}
 	if err := writeJSON(filepath.Join(p.Root, CatalogPath), p.Catalog); err != nil {
 		t.Fatal(err)
 	}
@@ -213,15 +225,23 @@ func TestFingerprintIgnoresGeneratedAndIDEButTracksTestsAndDefinitions(t *testin
 	put(t, p.Root, "var/private.go", "generated")
 	put(t, p.Root, ".idea/private.go", "IDE")
 	put(t, p.Root, "device.json", "not a test input")
+	put(t, p.Root, ".env", "PRIVATE_TOKEN=excluded")
+	put(t, p.Root, "mise.ci-stable.json", "not a MISE configuration or lockfile")
 	after, err := Fingerprint(p.Root)
 	if err != nil || before != after {
 		t.Fatal("generated/IDE/runtime data contaminated provenance", err)
 	}
-	for _, name := range []string{"impl_test.go", CatalogPath, ".github/workflows/ci.yml", "mise.toml"} {
+	for _, name := range []string{"impl_test.go", CatalogPath, ".github/workflows/ci.yml", "mise.toml", "mise.lock", "mise.ci-minimum.toml", "mise.ci-minimum.lock", "mise.ci-stable.toml", "mise.ci-stable.lock"} {
 		put(t, p.Root, name, "changed source input")
 		after, err = Fingerprint(p.Root)
 		if err != nil || before == after {
 			t.Fatal("changed source input did not invalidate evidence", name, err)
+		}
+		before = after
+		put(t, p.Root, name, "updated source input")
+		after, err = Fingerprint(p.Root)
+		if err != nil || before == after {
+			t.Fatal("updated source input did not invalidate evidence", name, err)
 		}
 		before = after
 	}
@@ -267,5 +287,43 @@ func TestCatalogJSONRoundtripDoesNotChangeAssessments(t *testing.T) {
 	}
 	if !slices.Equal(clone.Requirements[0].Evidence, p.Catalog.Requirements[0].Evidence) || clone.Requirements[0].Assessment != "T" {
 		t.Fatal("roundtrip changed review data")
+	}
+}
+
+func TestHarnessEvidenceRequiresDeclaredGoParentPackageAndNativeScenario(t *testing.T) {
+	p := fixture(t)
+	put(t, p.Root, "internal/conformancetest/conformance_e2e_test.go", "//go:build e2e\n\npackage conformancetest\nimport \"testing\"\nfunc TestE2EOfficialHarness(t *testing.T) {}\n")
+	var err error
+	p.Inventory, err = Discover(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Evidence{Suite: "harness", Package: "example.test/audit/internal/conformancetest", Test: "TestE2EOfficialHarness/client-initiated-pcm", Scenario: "client-initiated-pcm"}
+	e.ID = TestID(e.Suite, e.Package, e.Test)
+	if err := p.validateEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	if test, ok := p.evidenceTest(e); !ok || test.File != "internal/conformancetest/conformance_e2e_test.go" {
+		t.Fatal("harness subtest lost its Go source link", test)
+	}
+	for _, mode := range []string{"legacy-sidecar-id", "wrong-package", "wrong-parent", "wrong-scenario"} {
+		t.Run(mode, func(t *testing.T) {
+			bad := e
+			switch mode {
+			case "legacy-sidecar-id":
+				bad.ID = "harness:" + e.Scenario
+			case "wrong-package":
+				bad.Package = "example.test/audit"
+				bad.ID = TestID(bad.Suite, bad.Package, bad.Test)
+			case "wrong-parent":
+				bad.Test = "TestE2EMissing/" + e.Scenario
+				bad.ID = TestID(bad.Suite, bad.Package, bad.Test)
+			case "wrong-scenario":
+				bad.Scenario = "server-initiated-pcm"
+			}
+			if p.validateEvidence(bad) == nil {
+				t.Fatal("invalid harness Go evidence accepted")
+			}
+		})
 	}
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/echocat/sendspin-player-go/internal/protocol"
 )
 
-func TestReferenceConcurrentInadmissibleActivationsCannotEnterAdmission(t *testing.T) {
+func TestE2EReferenceConcurrentInadmissibleActivationsCannotEnterAdmission(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestReferenceConcurrentInadmissibleActivationsCannotEnterAdmission(t *testi
 	}
 }
 
-func TestReferenceFullRecordStoreProtectsThreeUnfinishedHandshakes(t *testing.T) {
+func TestE2EReferenceFullRecordStoreProtectsThreeUnfinishedHandshakes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	credentials, err := NewCredentials()

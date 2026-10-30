@@ -94,7 +94,7 @@ func raisePeak(peak *atomic.Int64, value int64) {
 	}
 }
 
-func TestReferenceSustainedPlaybackResourceSoak(t *testing.T) {
+func TestE2EReferenceSustainedPlaybackResourceSoak(t *testing.T) {
 	duration := 12 * time.Second
 	if value := os.Getenv("SENDSPIN_SOAK_DURATION"); value != "" {
 		var err error

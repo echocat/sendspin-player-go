@@ -120,7 +120,7 @@ func lifecycleTimestamp(t *testing.T, ref referenceServer) int64 {
 	return int64(ref.control(t, map[string]any{"command": "clock"})["now"].(float64)) + 100_000
 }
 
-func TestReferenceClearAndRoleRemovalCancelBufferedPlayback(t *testing.T) {
+func TestE2EReferenceClearAndRoleRemovalCancelBufferedPlayback(t *testing.T) {
 	for _, mode := range []string{"clear", "role-removal"} {
 		t.Run(mode, func(t *testing.T) {
 			credentials, err := NewCredentials()
@@ -188,7 +188,7 @@ func TestReferenceClearAndRoleRemovalCancelBufferedPlayback(t *testing.T) {
 	}
 }
 
-func TestReferenceRekeyPreservesBlockedAndQueuedPlayback(t *testing.T) {
+func TestE2EReferenceRekeyPreservesBlockedAndQueuedPlayback(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)

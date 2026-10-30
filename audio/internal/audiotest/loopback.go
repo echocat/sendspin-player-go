@@ -10,20 +10,20 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/sendspin-player-go/internal/e2etest"
+	"github.com/echocat/sendspin-player-go/internal/loopback"
 )
 
-// LoopbackConfig never opens defaults: InputFactory receives either the explicit
-// input ID or the explicitly selected common device. Backend-specific monitor
+// LoopbackConfig never opens defaults: InputFactory receives only the separately
+// authorized capture ID. Backend-specific monitor
 // semantics belong to the factory, not this fixture.
 type LoopbackConfig struct {
+	Suite         *e2etest.Suite
 	Prefix        string
 	OutputFactory func(string) audio.Output
 	InputFactory  func(string) audio.Input
@@ -31,60 +31,48 @@ type LoopbackConfig struct {
 
 func RunNativeLoopback(t *testing.T, config LoopbackConfig) {
 	t.Helper()
-	device := os.Getenv(config.Prefix + "_LOOPBACK_DEVICE")
-	if device == "" {
-		t.Skip(config.Prefix + "_LOOPBACK_DEVICE not set; no library, output or capture opened")
+	device, inputDevice := LoopbackDevices(t, config.Prefix)
+	if config.Suite == nil {
+		t.Fatal("native loopback requires an explicit package Suite")
 	}
-	inputDevice := os.Getenv(config.Prefix + "_LOOPBACK_INPUT_DEVICE")
-	if inputDevice == "" {
-		inputDevice = device
-	}
-	if strings.ContainsRune(device, 0) || strings.ContainsRune(inputDevice, 0) {
-		t.Fatal("invalid explicit loopback device")
-	}
-	root := repositoryRoot(t)
-	private := t.TempDir()
-	if err := os.Chmod(private, 0700); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	private := privateDirectory(t)
+	ctx, cancel := context.WithTimeout(config.Suite.Context(), 45*time.Second)
 	defer cancel()
-	tool := filepath.Join(private, "loopback-tool")
-	if runtime.GOOS == "windows" {
-		tool += ".exe"
-	}
-	if err := buildLoopbackTool(ctx, root, tool); err != nil {
-		t.Fatal(err)
-	}
-	reference := filepath.Join(private, "reference.wav")
 	runTool := func(args ...string) {
 		t.Helper()
 		// Never log raw recordings or upload these private temporary files.
-		if err := exec.CommandContext(ctx, tool, args...).Run(); err != nil {
+		if err := loopback.Run(args, io.Discard); err != nil {
 			t.Fatal("offline reference/marker analysis failed or measurement inconclusive:", err)
 		}
 	}
-	runTool("generate", "-out", reference, "-seconds", "3", "-amplitude", "0.01")
+	reference := ReferenceWAV(t, private)
+	// An explicit reference must carry its generator manifest; validate its
+	// presence before opening capture or playback, never synthesize a fallback.
+	if _, err := os.Stat(reference + ".json"); err != nil {
+		t.Fatal("reference marker manifest required:", err)
+	}
 	samples, err := loadWeakReference(reference)
 	if err != nil {
 		t.Fatal(err)
 	}
 	format := audio.Format{SampleRate: 48000, Channels: 2}
-	input, err := config.InputFactory(inputDevice).Open(ctx, format)
-	if err != nil {
-		t.Fatal("explicit native input open failed; no fallback:", err)
-	}
-	t.Cleanup(func() {
-		if err := input.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+	// Output selection happens first, so the native caller can bind capture to
+	// that selected backend instead of interpreting the same ID in another one.
 	output, err := config.OutputFactory(device).Open(ctx, format)
 	if err != nil {
 		t.Fatal("explicit native output open failed; no fallback:", err)
 	}
 	t.Cleanup(func() {
 		if err := output.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	input, err := config.InputFactory(inputDevice).Open(ctx, format)
+	if err != nil {
+		t.Fatal("explicit native input open failed; no fallback:", err)
+	}
+	t.Cleanup(func() {
+		if err := input.Close(); err != nil {
 			t.Error(err)
 		}
 	})
@@ -155,31 +143,6 @@ func RunNativeLoopback(t *testing.T, config LoopbackConfig) {
 	}
 	runTool("analyze", "-reference", reference, "-manifest", reference+".json", "-capture", capturePath, "-source", "recording", "-search-ms", "2000", "-out", filepath.Join(private, "analysis.json"))
 	t.Log("Expected reference markers found in native capture. Unknown calibration/routing state: absolute latency and physical synchronization remain undetermined. Private WAVs are deleted, never uploaded.")
-}
-
-func repositoryRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "internal", "loopbackcmd", "main.go")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("repository root not found")
-		}
-		dir = parent
-	}
-}
-
-func buildLoopbackTool(ctx context.Context, root, target string) error {
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", target, "./internal/loopbackcmd")
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off")
-	return cmd.Run()
 }
 
 func loadWeakReference(path string) ([]float32, error) {

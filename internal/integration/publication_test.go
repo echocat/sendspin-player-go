@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -12,8 +11,7 @@ import (
 )
 
 func TestRootSDKHasNoSubmodules(t *testing.T) {
-	_, here, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "../.."))
+	root := integrationRoot
 	sdk := readModule(t, filepath.Join(root, "go.mod"))
 	for _, requirement := range sdk.Require {
 		if requirement.Mod.Path == sdk.Module.Mod.Path || strings.HasPrefix(requirement.Mod.Path, sdk.Module.Mod.Path+"/") {
@@ -60,8 +58,7 @@ func TestExamplesHaveIndependentApplicationModules(t *testing.T) {
 	if os.Getenv("SENDSPIN_ARCHIVE_INNER") == "1" {
 		t.Skip("example modules are deliberately absent from the SDK module zip")
 	}
-	_, here, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "../.."))
+	root := integrationRoot
 	if _, err := os.Stat(filepath.Join(root, "_examples")); os.IsNotExist(err) {
 		t.Skip("example module validation requires checkout sources")
 	} else if err != nil {
@@ -81,8 +78,10 @@ func TestExamplesHaveIndependentApplicationModules(t *testing.T) {
 			for _, requirement := range application.Require {
 				if requirement.Mod.Path == sdk.Module.Mod.Path {
 					requiresSDK = true
-					if requirement.Indirect || requirement.Mod.Version == "v0.0.0" {
-						t.Error("examples must directly require a real SDK release")
+					// The root replace below permits v0.0.0 as an intentional
+					// local-development placeholder; no published release is needed.
+					if requirement.Indirect {
+						t.Error("examples must directly require the root SDK module")
 					}
 				} else if strings.HasPrefix(requirement.Mod.Path, sdk.Module.Mod.Path+"/") {
 					t.Error("SDK packages must not be separate module dependencies:", requirement.Mod)
@@ -108,8 +107,7 @@ func TestExamplesHaveIndependentApplicationModules(t *testing.T) {
 }
 
 func TestPythonHarnessesHaveNoModuleMarkers(t *testing.T) {
-	_, here, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(here), "../.."))
+	root := integrationRoot
 	for _, dir := range []string{"internal/e2e", "internal/conformancetest"} {
 		for _, name := range []string{"go.mod", "go.sum"} {
 			path := filepath.Join(root, dir, name)

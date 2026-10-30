@@ -252,12 +252,13 @@ func TestBackendInventoryUsesRootPackagesAndSeparateOptInSuites(t *testing.T) {
 	for _, file := range []string{"audio/pipewire/abi_test.go", "audio/internal/bridge/callback_test.go"} {
 		put(t, p.Root, file, "package backend\nimport \"testing\"\nfunc TestABI(t *testing.T) {}\n")
 	}
-	put(t, p.Root, "audio/coreaudio/loopback_e2e_test.go", "//go:build e2e && darwin\n\npackage coreaudio\nimport \"testing\"\nfunc TestNativeLoopback(t *testing.T) {}\n")
+	put(t, p.Root, "audio/native/hardware_e2e_test.go", "//go:build e2e\n\npackage native\nimport \"testing\"\nfunc TestE2ENativeLoopback(t *testing.T) {}\n")
+	put(t, p.Root, "audio/pipewire/isolated_e2e_test.go", "//go:build e2e && linux\n\npackage pipewire\nimport \"testing\"\nfunc TestE2EPrivatePipeWire(t *testing.T) {}\n")
 	inv, err := Discover(p.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"desktop-audio:example.test/audit/audio/pipewire#TestABI", "desktop-audio:example.test/audit/audio/internal/bridge#TestABI", "desktop-audio-e2e:example.test/audit/audio/coreaudio#TestNativeLoopback"} {
+	for _, id := range []string{"desktop-audio:example.test/audit/audio/pipewire#TestABI", "desktop-audio:example.test/audit/audio/internal/bridge#TestABI", "desktop-audio-e2e:example.test/audit/audio/native#TestE2ENativeLoopback", "desktop-audio-e2e:example.test/audit/audio/pipewire#TestE2EPrivatePipeWire"} {
 		if _, ok := inv.Tests[id]; !ok {
 			t.Fatal("missing migrated test", id)
 		}
@@ -289,11 +290,12 @@ func TestBackendInventoryUsesRootPackagesAndSeparateOptInSuites(t *testing.T) {
 	}
 }
 
-func backendE2EReportFixture(t *testing.T, events string) Report {
+func nativeHardwareReportFixture(t *testing.T, events string) Report {
 	t.Helper()
+	events = strings.ReplaceAll(events, `"Package":"example.test/audit"`, `"Package":"example.test/audit/audio/native"`)
 	p := fixture(t)
 	manifest, directory := evidenceFixture(t, p, events)
-	manifest.Suite = "alsa-e2e"
+	manifest.Suite = "desktop-audio-e2e"
 	manifest.Scope = suiteScope(manifest.Suite)
 	calls, err := p.invocations(manifest.Suite, false)
 	if err != nil {
@@ -305,7 +307,7 @@ func backendE2EReportFixture(t *testing.T, events string) Report {
 	if err := os.Remove(filepath.Join(filepath.Dir(directory), "current.json")); err != nil {
 		t.Fatal(err)
 	}
-	slot := filepath.Join(p.Root, "var/audit/evidence/alsa-e2e/context")
+	slot := filepath.Join(p.Root, "var/audit/evidence/desktop-audio-e2e/context")
 	put(t, slot, "run-fixture/events.jsonl", events)
 	if err := writeJSON(filepath.Join(slot, "run-fixture/manifest.json"), manifest); err != nil {
 		t.Fatal(err)
@@ -315,36 +317,97 @@ func backendE2EReportFixture(t *testing.T, events string) Report {
 	}{"run-fixture/manifest.json"}); err != nil {
 		t.Fatal(err)
 	}
-	report, err := p.Report(ReportOptions{Profile: "alsa-e2e"})
+	report, err := p.Report(ReportOptions{Profile: "desktop-audio-e2e"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return report
 }
 
-func TestBackendE2ESkipIsNotReportedAsHardwarePass(t *testing.T) {
+func TestNativeSkipIsNotReportedAsHardwarePass(t *testing.T) {
 	for _, name := range backendHardwareTests {
 		t.Run(name, func(t *testing.T) {
 			events := strings.ReplaceAll(validGoEvents, `"Action":"pass","Package":"example.test/audit","Test":"TestOne"`, `"Action":"skip","Package":"example.test/audit","Test":"TestOne"`)
 			events = strings.ReplaceAll(events, "TestOne", name)
-			report := backendE2EReportFixture(t, events)
-			if !slices.Contains(report.Problems, "required suite alsa-e2e: skip") || report.ConformanceClaim {
+			report := nativeHardwareReportFixture(t, events)
+			if !slices.Contains(report.Problems, "required suite desktop-audio-e2e: skip") || report.ConformanceClaim {
 				t.Fatal("hardware skip promoted", report.Problems)
 			}
 		})
 	}
 }
 
-func TestBackendE2ERequiresNativeInputNotOnlyOutput(t *testing.T) {
+func TestNativeHardwareRequiresInputNotOnlyOutput(t *testing.T) {
 	// Successful output and marker tests must not hide an absent Source/Input run.
 	events := `{"Action":"start","Package":"example.test/audit"}` + "\n"
-	for _, name := range []string{"TestNativeLoopback", "TestReferenceServerPlaybackScenario"} {
+	for _, name := range []string{"TestE2ENativeLoopback", "TestE2EReferenceServerPlaybackScenario"} {
 		events += `{"Action":"run","Package":"example.test/audit","Test":"` + name + `"}` + "\n"
 		events += `{"Action":"pass","Package":"example.test/audit","Test":"` + name + `"}` + "\n"
 	}
 	events += `{"Action":"pass","Package":"example.test/audit"}` + "\n"
-	report := backendE2EReportFixture(t, events)
-	if !slices.Contains(report.Problems, "required suite alsa-e2e: not-run") || report.ConformanceClaim {
+	report := nativeHardwareReportFixture(t, events)
+	if !slices.Contains(report.Problems, "required suite desktop-audio-e2e: not-run") || report.ConformanceClaim {
 		t.Fatal("missing Source/Input E2E promoted", report.Problems)
+	}
+}
+
+func TestHardwareNamesInAnotherPackageCannotSatisfyNativeEvidence(t *testing.T) {
+	events := `{"Action":"start","Package":"example.test/other"}` + "\n"
+	for _, name := range backendHardwareTests {
+		events += `{"Action":"run","Package":"example.test/other","Test":"` + name + `"}` + "\n"
+		events += `{"Action":"pass","Package":"example.test/other","Test":"` + name + `"}` + "\n"
+	}
+	events += `{"Action":"pass","Package":"example.test/other"}` + "\n"
+	report := nativeHardwareReportFixture(t, events)
+	if !slices.Contains(report.Problems, "required suite desktop-audio-e2e: not-run") {
+		t.Fatal("same global test names in another package credited as native", report.Problems)
+	}
+}
+
+func TestPrivatePipeWireSoftwarePassCannotSatisfyNativeHardware(t *testing.T) {
+	events := strings.ReplaceAll(validGoEvents, "TestOne", "TestE2EPrivatePipeWire")
+	events = strings.ReplaceAll(events, `"Package":"example.test/audit"`, `"Package":"example.test/audit/audio/pipewire"`)
+	report := nativeHardwareReportFixture(t, events)
+	if !slices.Contains(report.Problems, "required suite desktop-audio-e2e: not-run") || report.ConformanceClaim {
+		t.Fatal("private software daemon credited as generic hardware", report.Problems)
+	}
+}
+
+func TestOrdinaryUnitPassCannotCoverTaggedPeerTests(t *testing.T) {
+	p := fixture(t)
+	e := Evidence{Suite: "e2e", Package: "example.test/audit", Test: "TestE2EPeer"}
+	e.ID = TestID(e.Suite, e.Package, e.Test)
+	p.Catalog.Evidence = append(p.Catalog.Evidence, e)
+	p.Catalog.Requirements[0].Evidence = append(p.Catalog.Requirements[0].Evidence, e.ID)
+	evidenceFixture(t, p, validGoEvents)
+	report, err := p.Report(ReportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Requirements[0].EvidenceStatus == "pass" {
+		t.Fatal("ordinary unit pass promoted to E2E coverage")
+	}
+	for _, evidence := range report.Requirements[0].Evidence {
+		if evidence.ID == e.ID && evidence.Status != "not-run" {
+			t.Fatal("tagged E2E unexpectedly credited", evidence)
+		}
+	}
+}
+
+func TestHistoricalCommandsRemainStaleAfterGoEntrypointMigration(t *testing.T) {
+	p := fixture(t)
+	manifest, directory := evidenceFixture(t, p, validGoEvents)
+	manifest.SourceSHA256 = strings.Repeat("f", 64)
+	manifest.Commands[0].Kind = "harness"
+	manifest.Commands[0].Args = []string{"run", "./internal/conformancetestcmd"}
+	if err := writeJSON(filepath.Join(directory, "manifest.json"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Report(ReportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Requirements[0].Evidence[0].Status != "stale" || report.Requirements[0].EvidenceStatus == "pass" {
+		t.Fatal("historical commands were revalidated or credited for the current checkout")
 	}
 }

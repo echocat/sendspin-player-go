@@ -112,7 +112,7 @@ func waitReferenceTimestamp(t *testing.T, ref referenceServer, timestamp int64) 
 	})
 }
 
-func TestReferenceScheduledMetadataAndColor(t *testing.T) {
+func TestE2EReferenceScheduledMetadataAndColor(t *testing.T) {
 	client, ref, _ := referenceMediaClient(t, Config{Roles: []Role{MetadataRole, ColorRole}})
 	mediaCommand(t, client, ref, map[string]any{"command": "metadata", "fields": map[string]any{"title": "current", "artist": "artist", "album": "album", "year": 2026, "track": 2, "track_progress": 100, "track_duration": 9000, "playback_speed": 1000}})
 	mediaCommand(t, client, ref, map[string]any{"command": "color", "fields": map[string]any{"primary": []int{11, 22, 33}, "accent": []int{44, 55, 66}}})
@@ -159,7 +159,7 @@ func TestReferenceScheduledMetadataAndColor(t *testing.T) {
 	}
 }
 
-func TestReferenceRoleRemovalDropsScheduledState(t *testing.T) {
+func TestE2EReferenceRoleRemovalDropsScheduledState(t *testing.T) {
 	client, ref, _ := referenceMediaClient(t, Config{Roles: []Role{MetadataRole, ColorRole}})
 	mediaCommand(t, client, ref, map[string]any{"command": "metadata", "fields": map[string]any{"title": "current"}})
 	mediaCommand(t, client, ref, map[string]any{"command": "color", "fields": map[string]any{"primary": []int{1, 2, 3}}})
@@ -218,7 +218,7 @@ func assertReferenceArtwork(t *testing.T, log *mediaEvents, result map[string]an
 	}
 }
 
-func TestReferenceMultipartArtworkAndChannels(t *testing.T) {
+func TestE2EReferenceMultipartArtworkAndChannels(t *testing.T) {
 	client, ref, events := referenceMediaClient(t, Config{Roles: []Role{ArtworkRole}, Artwork: []ArtworkChannel{
 		{Source: "album", Format: "png", Width: 512, Height: 512}, {Source: "artist", Format: "jpeg", Width: 160, Height: 90}, {Source: "none"}, {Source: "album", Format: "jpeg", Width: 64, Height: 64},
 	}})
@@ -254,7 +254,7 @@ func TestReferenceMultipartArtworkAndChannels(t *testing.T) {
 	}
 }
 
-func TestReferenceScheduledArtworkCancelAndRoleRemoval(t *testing.T) {
+func TestE2EReferenceScheduledArtworkCancelAndRoleRemoval(t *testing.T) {
 	client, ref, events := referenceMediaClient(t, Config{Roles: []Role{ArtworkRole}, Artwork: []ArtworkChannel{{Source: "album", Format: "png", Width: 64, Height: 64}}})
 	dimensions := map[int]image.Point{0: {X: 64, Y: 64}}
 	current := mediaCommand(t, client, ref, map[string]any{"command": "artwork", "seed": 3})
@@ -314,7 +314,7 @@ func visualizationBytes(v Visualization) []byte {
 	}
 }
 
-func TestReferenceVisualizerVectorsAndBeat(t *testing.T) {
+func TestE2EReferenceVisualizerVectorsAndBeat(t *testing.T) {
 	for _, beatOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("beat=%t", beatOnly), func(t *testing.T) {
 			config := VisualizerConfig{Types: []string{"loudness", "f_peak", "spectrum", "peak"}, RateMax: 30, Spectrum: &Spectrum{Bins: 4, Scale: "lin", MinFrequency: 20, MaxFrequency: 20000}}
@@ -362,7 +362,7 @@ func TestReferenceVisualizerVectorsAndBeat(t *testing.T) {
 	}
 }
 
-func TestReferenceVisualizerClearAndEndDropFutureFrames(t *testing.T) {
+func TestE2EReferenceVisualizerClearAndEndDropFutureFrames(t *testing.T) {
 	for _, boundary := range []string{"visualizer_clear", "visualizer_end", "roles"} {
 		t.Run(boundary, func(t *testing.T) {
 			client, ref, events := referenceMediaClient(t, Config{Roles: []Role{VisualizerRole}, Visualizer: VisualizerConfig{Types: []string{"loudness", "f_peak", "spectrum", "peak"}, RateMax: 30, Spectrum: &Spectrum{Bins: 4, Scale: "lin", MinFrequency: 20, MaxFrequency: 20000}}})
@@ -390,7 +390,7 @@ func TestReferenceVisualizerClearAndEndDropFutureFrames(t *testing.T) {
 	}
 }
 
-func TestReferenceScheduledArtworkReplacementClearAndResume(t *testing.T) {
+func TestE2EReferenceScheduledArtworkReplacementClearAndResume(t *testing.T) {
 	ctx := context.Background()
 	client, ref, events := referenceMediaClient(t, Config{Roles: []Role{ArtworkRole}, Artwork: []ArtworkChannel{{Source: "album", Format: "png", Width: 64, Height: 64}}})
 	dimensions := map[int]image.Point{0: {X: 64, Y: 64}}

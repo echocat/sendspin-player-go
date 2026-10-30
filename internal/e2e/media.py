@@ -17,11 +17,11 @@ from aiohttp import web
 from aiosendspin.models.core import ServerActivateMessage, ServerActivatePayload
 from aiosendspin.models.types import ArtworkSource, BinaryMessageType, MediaCommand, RepeatMode
 from aiosendspin.models.visualizer import BeatTiming
-from aiosendspin.noise.wire import EncryptedWebSocket
 from aiosendspin.server.roles.base import AudioChunk
 from aiosendspin.server.roles.color.state import Color
 from aiosendspin.server.roles.metadata.state import Metadata
 from aiosendspin.server.roles.visualizer.packing import pack_visualizer_frame
+from pairing_observer import current_scope, _send_str
 
 
 class ArtworkWireProbe:
@@ -39,52 +39,46 @@ class ArtworkWireProbe:
         self.armed = True
         self.paused = asyncio.Event()
         self.release = asyncio.Event()
-        self._send_bytes = EncryptedWebSocket.send_bytes
-        self._send_str = EncryptedWebSocket.send_str
+        self.scope = current_scope.get()
+        self.scope.artwork = self
 
-        async def send_bytes(transport, data):
-            await self._send_bytes(transport, data)
-            if len(data) < 2 or not 8 <= data[0] <= 11:
-                return
-            channel, flags = data[0] - 8, data[1]
-            record = {"channel": channel, "flags": flags, "bytes": len(data)}
-            if flags == 2 and len(data) == 14:
-                timestamp, size = struct.unpack(">qI", data[2:])
-                record.update(timestamp=timestamp, total_size=size)
-                self.transfers[channel] = [timestamp, size, 0]
-            transfer = self.transfers.get(channel)
-            if transfer is not None:
-                record["timestamp"] = transfer[0]
-                if flags == 0:
-                    transfer[2] += len(data) - 2
-                if flags == 1 or transfer[2] == transfer[1]:
-                    self.transfers.pop(channel, None)
-            self.frames.append(record)
-            if flags == 0 and self.armed:
-                self.armed = False
-                await self._send_str(transport, json.dumps({
-                    "type": "group/update", "payload": {
-                        "group_id": "artwork-wire-probe", "group_name": self.marker,
-                        "playback_state": "stopped",
-                    },
-                }))
-                self.paused.set()
-                await self.release.wait()
+    async def observe_bytes(self, transport, data):
+        if len(data) < 2 or not 8 <= data[0] <= 11:
+            return
+        channel, flags = data[0] - 8, data[1]
+        record = {"channel": channel, "flags": flags, "bytes": len(data)}
+        if flags == 2 and len(data) == 14:
+            timestamp, size = struct.unpack(">qI", data[2:])
+            record.update(timestamp=timestamp, total_size=size)
+            self.transfers[channel] = [timestamp, size, 0]
+        transfer = self.transfers.get(channel)
+        if transfer is not None:
+            record["timestamp"] = transfer[0]
+            if flags == 0:
+                transfer[2] += len(data) - 2
+            if flags == 1 or transfer[2] == transfer[1]:
+                self.transfers.pop(channel, None)
+        self.frames.append(record)
+        if flags == 0 and self.armed:
+            self.armed = False
+            await _send_str(transport, json.dumps({
+                "type": "group/update", "payload": {
+                    "group_id": "artwork-wire-probe", "group_name": self.marker,
+                    "playback_state": "stopped",
+                },
+            }))
+            self.paused.set()
+            await self.release.wait()
 
-        async def send_str(transport, data):
-            await self._send_str(transport, data)
-            if '"stream/end"' in data or '"server/activate"' in data:
-                message = json.loads(data)
-                if message.get("type") in ("stream/end", "server/activate"):
-                    self.frames.append({"type": message["type"]})
-
-        EncryptedWebSocket.send_bytes = send_bytes
-        EncryptedWebSocket.send_str = send_str
+    def observe_str(self, data):
+        if '"stream/end"' in data or '"server/activate"' in data:
+            message = json.loads(data)
+            if message.get("type") in ("stream/end", "server/activate"):
+                self.frames.append({"type": message["type"]})
 
     def close(self):
         self.release.set()
-        EncryptedWebSocket.send_bytes = self._send_bytes
-        EncryptedWebSocket.send_str = self._send_str
+        self.scope.artwork = None
 
 
 class MediaControls:

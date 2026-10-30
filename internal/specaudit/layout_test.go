@@ -7,14 +7,14 @@ import (
 func TestRootNativeSelectorAndOfflineToolKeepTheirEvidenceSuites(t *testing.T) {
 	p := fixture(t)
 	put(t, p.Root, "audio/native/output_test.go", "package native\nimport \"testing\"\nfunc TestSelector(t *testing.T){}\n")
-	put(t, p.Root, "internal/loopbackcmd/main_test.go", "package main\nimport \"testing\"\nfunc TestOffline(t *testing.T){}\n")
+	put(t, p.Root, "internal/loopback/main_test.go", "package loopback\nimport \"testing\"\nfunc TestCLIWorkflowAndNoOverwrite(t *testing.T){}\n")
 	p, err := Load(p.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{
 		TestID("desktop-audio", "example.test/audit/audio/native", "TestSelector"),
-		TestID("unit", "example.test/audit/internal/loopbackcmd", "TestOffline"),
+		TestID("unit", "example.test/audit/internal/loopback", "TestCLIWorkflowAndNoOverwrite"),
 	} {
 		if _, ok := p.Inventory.Tests[id]; !ok {
 			t.Fatal("root-module package assigned wrong evidence suite", id)

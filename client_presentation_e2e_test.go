@@ -32,7 +32,7 @@ func referencePresentationClient(t *testing.T) (*Client, referenceServer, *contr
 	return client, ref, store, connection
 }
 
-func TestReferencePausedLargePositionIsExactAndProgressCanBeCleared(t *testing.T) {
+func TestE2EReferencePausedLargePositionIsExactAndProgressCanBeCleared(t *testing.T) {
 	client, ref, _, _ := referencePresentationClient(t)
 	for _, position := range []int64{9007199254740993, math.MaxInt64 - 1} {
 		mediaCommand(t, client, ref, map[string]any{"command": "metadata", "fields": map[string]any{"title": "paused", "track": 1, "track_progress": position, "track_duration": 0, "playback_speed": 0}})
@@ -58,7 +58,7 @@ func TestReferencePausedLargePositionIsExactAndProgressCanBeCleared(t *testing.T
 	}
 }
 
-func TestReferenceMalformedPresentationStateClosesSilently(t *testing.T) {
+func TestE2EReferenceMalformedPresentationStateClosesSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name, role string
 		fields     map[string]any

@@ -11,6 +11,45 @@ import (
 	"time"
 )
 
+func TestOptionalAuditSuitesUseOrdinaryGoTestEntrypoints(t *testing.T) {
+	p := fixture(t)
+	for suite, pkg := range map[string]string{
+		"e2e": "./...", "mdns": "./internal/mdnstest",
+		"harness": "./internal/conformancetest", "reference": "./internal/timesync",
+		"desktop-audio-e2e": "./audio/native/...", "alsa-e2e": "./audio/native/...",
+	} {
+		t.Run(suite, func(t *testing.T) {
+			calls, err := p.invocations(suite, false)
+			if err != nil || len(calls) != 1 {
+				t.Fatal(calls, err)
+			}
+			call := calls[0]
+			if call.kind != "go" || call.args[0] != "test" || !slices.Contains(call.args, "-tags=e2e") || !slices.Contains(call.args, pkg) {
+				t.Fatal("not a tagged Go test invocation", call)
+			}
+			manifest := Manifest{Suite: suite, Scope: suiteScope(suite), Commands: []Command{{Directory: call.dir, Kind: call.kind, Args: slices.Clone(call.args), Environment: executionEnv(call)}}}
+			if err := p.validateCommands(manifest); err != nil {
+				t.Fatal(err)
+			}
+			for _, obsolete := range []string{"mdns_e2e", "timefilter_reference"} {
+				manifest.Commands[0].Args = slices.Clone(call.args)
+				for i, arg := range manifest.Commands[0].Args {
+					if arg == "-tags=e2e" {
+						manifest.Commands[0].Args[i] = "-tags=" + obsolete
+					}
+				}
+				if p.validateCommands(manifest) == nil {
+					t.Fatal("obsolete tags accepted")
+				}
+			}
+			manifest.Commands[0].Args = []string{"run", "./internal/conformancetestcmd"}
+			if p.validateCommands(manifest) == nil {
+				t.Fatal("obsolete Go run command accepted")
+			}
+		})
+	}
+}
+
 func TestExampleSuiteRunsBothIndependentModulesWithoutCGO(t *testing.T) {
 	p := fixture(t)
 	calls, err := p.invocations("examples", false)

@@ -20,6 +20,7 @@ import (
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/codec"
 	"github.com/echocat/sendspin-player-go/diagnostic"
+	"github.com/echocat/sendspin-player-go/internal/e2etest"
 )
 
 type scenarioPhase struct {
@@ -48,6 +49,9 @@ type scenarioReceipt struct {
 // ScenarioConfig keeps backend construction lazy: the factory is called only
 // after explicit opt-in and validation. No native failure falls back to a fake.
 type ScenarioConfig struct {
+	Suite *e2etest.Suite
+	// Prefix is retained for existing private fixtures; it never selects a
+	// backend, changes environment keys or hides an explicit configuration error.
 	Prefix        string
 	OutputFactory func(device string) audio.Output
 	// SoftwareFixture uses short phases with a real private software graph,
@@ -57,32 +61,23 @@ type ScenarioConfig struct {
 
 func RunReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig) {
 	t.Helper()
-	prefix := config.Prefix
-	live := os.Getenv(prefix+"_E2E_PLAYBACK") == "1"
-	virtual := os.Getenv(prefix+"_E2E_VIRTUAL") == "1"
-	if !live && !virtual {
-		t.Skip("explicit native or virtual E2E opt-in required; no server or device opened")
+	runReferenceServerPlaybackScenario(t, config, false)
+}
+
+// Only the package's software test can select a virtual output. Native callers
+// must always supply an explicit device and never fall back on a failed open.
+func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, virtual bool) {
+	t.Helper()
+	var device string
+	if !virtual {
+		device = PlaybackDevice(t, config.Prefix)
 	}
-	if live && virtual {
-		t.Fatal("native and virtual modes are mutually exclusive; no fallback")
+	if config.Suite == nil {
+		t.Fatal("playback scenario requires an explicit package Suite")
 	}
-	device := os.Getenv(prefix + "_E2E_DEVICE")
-	if live && device == "" {
-		t.Skip(prefix + "_E2E_DEVICE required; no library, server or device opened")
-	}
-	root := os.Getenv(prefix + "_E2E_ROOT")
-	dir := os.Getenv(prefix + "_E2E_ARTIFACT_DIR")
-	if !filepath.IsAbs(root) || !filepath.IsAbs(dir) {
-		t.Fatal("absolute repository and private artifact directory required")
-	}
-	reference := os.Getenv(prefix + "_REFERENCE_FILE")
-	if !filepath.IsAbs(reference) {
-		t.Fatal("absolute weak reference file required")
-	}
-	if _, err := loadWeakReference(reference); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+	dir := privateDirectory(t)
+	reference := ReferenceWAV(t, dir)
+	ctx, cancel := context.WithTimeout(config.Suite.Context(), 240*time.Second)
 	defer cancel()
 	var base audio.Output
 	if virtual {
@@ -117,7 +112,7 @@ func RunReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig) {
 		t.Fatal(err)
 	}
 	key := cred.PairingPSK
-	ref := startScenarioReference(t, ctx, root, dir, reference, cred, key)
+	ref := startScenarioReference(t, config.Suite, reference, cred, key)
 	cred.Records = []sendspin.PairingRecord{{ServerID: ref.id, PSK: key}}
 	store := &sendspin.MemoryStore{}
 	if err = store.Save(ctx, cred); err != nil {

@@ -84,7 +84,7 @@ func pairCodeAsync(ctx context.Context, ref referenceServer, method string) <-ch
 	}()
 	return done
 }
-func TestReferenceStaticAndDynamicPINPairingBothCipherSuites(t *testing.T) {
+func TestE2EReferenceStaticAndDynamicPINPairingBothCipherSuites(t *testing.T) {
 	for _, suite := range []string{wire.ChaCha, wire.AES} {
 		for _, method := range []string{"static_pairing_code", "dynamic_pairing_code"} {
 			for _, inbound := range []bool{false, true} {
@@ -140,7 +140,7 @@ func TestReferenceStaticAndDynamicPINPairingBothCipherSuites(t *testing.T) {
 		}
 	}
 }
-func TestReferenceDynamicPINRetryUsesSameCode(t *testing.T) {
+func TestE2EReferenceDynamicPINRetryUsesSameCode(t *testing.T) {
 	c, ref, store, shown := codePairClient(t, wire.ChaCha, "dynamic_pairing_code")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -193,7 +193,7 @@ func submitPIN(t *testing.T, ctx context.Context, ref referenceServer, value str
 	}
 }
 
-func TestReferenceStaticPINWindowClosesAfterFiveFailures(t *testing.T) {
+func TestE2EReferenceStaticPINWindowClosesAfterFiveFailures(t *testing.T) {
 	c, ref, store, _ := codePairClient(t, wire.ChaCha, "static_pairing_code")
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
@@ -229,7 +229,7 @@ func TestReferenceStaticPINWindowClosesAfterFiveFailures(t *testing.T) {
 	eventually(t, func() bool { cred, _ := store.Load(ctx); return len(cred.Records) == 1 })
 }
 
-func TestReferenceDynamicPINGlobalTwentyRoundLimitAndLocalUnlock(t *testing.T) {
+func TestE2EReferenceDynamicPINGlobalTwentyRoundLimitAndLocalUnlock(t *testing.T) {
 	c, ref, store, shown := codePairClient(t, wire.ChaCha, "dynamic_pairing_code")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

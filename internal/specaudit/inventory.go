@@ -102,37 +102,32 @@ func Discover(root string) (Inventory, error) {
 				return err
 			}
 		}
-		active := func(tags ...string) bool {
-			if expression == nil {
-				return true
-			}
-			return expression.Eval(func(tag string) bool {
-				switch tag {
-				case "e2e", "mdns_e2e", "timefilter_reference":
-					return slices.Contains(tags, tag)
-				}
-				return true // Platform constraints are checked by actual execution, not inferred here.
-			})
-		}
+		ordinary, e2e := buildActive(expression, false), buildActive(expression, true)
 		for _, declaration := range file.Decls {
 			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || fn.Type.Results != nil {
+			if !ok || fn.Recv != nil || fn.Type.TypeParams != nil || fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || fn.Type.Results != nil {
 				continue
 			}
 			parameter, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
 			if !ok {
 				continue
 			}
-			selector, ok := parameter.X.(*ast.SelectorExpr)
-			if !ok {
-				continue
+			testingType := ""
+			switch typ := parameter.X.(type) {
+			case *ast.SelectorExpr:
+				if alias, ok := typ.X.(*ast.Ident); ok && testingAliases[alias.Name] {
+					testingType = typ.Sel.Name
+				}
+			case *ast.Ident:
+				if testingAliases["."] {
+					testingType = typ.Name
+				}
 			}
-			alias, ok := selector.X.(*ast.Ident)
-			if !ok || !testingAliases[alias.Name] {
+			if testingType == "" {
 				continue
 			}
 			name := fn.Name.Name
-			if !(strings.HasPrefix(name, "Test") && selector.Sel.Name == "T") && !(strings.HasPrefix(name, "Fuzz") && selector.Sel.Name == "F") {
+			if !(strings.HasPrefix(name, "Test") && testingType == "T") && !(strings.HasPrefix(name, "Fuzz") && testingType == "F") {
 				continue
 			}
 			prefix := 4 // Test and Fuzz both have a four-character prefix.
@@ -146,29 +141,39 @@ func Discover(root string) (Inventory, error) {
 				continue
 			}
 			var suite string
+			if strings.HasPrefix(name, "TestE2E") && ordinary {
+				return fmt.Errorf("E2E test is active without the e2e tag: %s#%s", relative, name)
+			}
+			if !ordinary && e2e && !strings.HasPrefix(name, "TestE2E") {
+				return fmt.Errorf("E2E test must start with TestE2E: %s#%s", relative, name)
+			}
 			switch {
 			case strings.HasPrefix(name, "Fuzz"):
 				suite = "fuzz"
+			case !ordinary && !e2e:
+				return fmt.Errorf("test does not match ordinary Go tests or the e2e tag: %s", relative)
+			case !ordinary && directory == "internal/mdnstest":
+				suite = "mdns"
+			case !ordinary && directory == "internal/conformancetest":
+				suite = "harness"
+			case !ordinary && relative == "internal/timesync/reference_live_test.go":
+				suite = "reference"
 			case directory == "audio/alsa" || strings.HasPrefix(directory, "audio/alsa/"):
 				suite = "alsa"
-				if !active() && active("e2e") {
+				if !ordinary && e2e {
 					suite = "alsa-e2e"
 				}
 			case directory == "audio/native" || strings.HasPrefix(directory, "audio/internal/") || slices.Contains([]string{"audio/pipewire", "audio/coreaudio", "audio/wasapi"}, directory):
 				suite = "desktop-audio"
-				if !active() && active("e2e") {
+				if !ordinary && e2e {
 					suite = "desktop-audio-e2e"
 				}
 			case strings.HasPrefix(directory, "_examples/"):
 				suite = "examples"
-			case active():
+			case ordinary:
 				suite = "unit"
-			case active("e2e"):
+			case e2e:
 				suite = "e2e"
-			case active("e2e", "mdns_e2e"):
-				suite = "mdns"
-			case active("timefilter_reference"):
-				suite = "reference"
 			default:
 				return fmt.Errorf("test does not match a known opt-in suite: %s", relative)
 			}
@@ -181,6 +186,49 @@ func Discover(root string) (Inventory, error) {
 		return nil
 	})
 	return result, err
+}
+
+// Evaluate each platform separately: treating all platform tags as true loses
+// !linux/!amd64 alternatives and accepts impossible linux && windows expressions.
+// Only e2e is an opt-in tag; obsolete/custom tags are never implicitly enabled.
+func buildActive(expression constraint.Expr, e2e bool) bool {
+	if expression == nil {
+		return true
+	}
+	for _, platform := range strings.Fields(`
+		aix/ppc64 android/386 android/amd64 android/arm android/arm64
+		darwin/amd64 darwin/arm64 dragonfly/amd64
+		freebsd/386 freebsd/amd64 freebsd/arm freebsd/arm64 illumos/amd64
+		ios/amd64 ios/arm64 js/wasm
+		linux/386 linux/amd64 linux/arm linux/arm64 linux/loong64
+		linux/mips linux/mips64 linux/mips64le linux/mipsle
+		linux/ppc64 linux/ppc64le linux/riscv64 linux/s390x
+		netbsd/386 netbsd/amd64 netbsd/arm netbsd/arm64
+		openbsd/386 openbsd/amd64 openbsd/arm openbsd/arm64 openbsd/ppc64 openbsd/riscv64
+		plan9/386 plan9/amd64 plan9/arm solaris/amd64 wasip1/wasm
+		windows/386 windows/amd64 windows/arm64
+	`) {
+		goos, goarch, _ := strings.Cut(platform, "/")
+		if expression.Eval(func(tag string) bool {
+			switch tag {
+			case "e2e":
+				return e2e
+			case "unix":
+				return !slices.Contains([]string{"js", "plan9", "wasip1", "windows"}, goos)
+			case "linux":
+				return goos == "linux" || goos == "android"
+			case "darwin":
+				return goos == "darwin" || goos == "ios"
+			case "solaris":
+				return goos == "solaris" || goos == "illumos"
+			default:
+				return tag == goos || tag == goarch
+			}
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // Fingerprint includes the catalog, test/implementation inputs, fixtures,
@@ -222,7 +270,8 @@ func walkInputs(root string, visit func(string, []byte) error) error {
 			}
 			return nil
 		}
-		if len(parts) == 1 && !strings.HasSuffix(relative, ".go") && !slices.Contains([]string{"go.mod", "go.sum", "mise.toml", "mise.lock", "README.md", "NOTICES.md", "LICENSE", ".gitattributes", ".gitignore", ".golangci.yaml"}, relative) {
+		miseInput := strings.HasPrefix(relative, "mise.") && slices.Contains([]string{".toml", ".lock"}, path.Ext(relative))
+		if len(parts) == 1 && !strings.HasSuffix(relative, ".go") && !miseInput && !slices.Contains([]string{"go.mod", "go.sum", "README.md", "NOTICES.md", "LICENSE", ".gitattributes", ".gitignore", ".golangci.yaml"}, relative) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {

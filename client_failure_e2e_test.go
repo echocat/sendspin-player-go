@@ -39,7 +39,7 @@ func connectReference(t *testing.T, client *Client, ref referenceServer) *outbou
 	return connection
 }
 
-func TestReferenceClientCredentialLossAndRepair(t *testing.T) {
+func TestE2EReferenceClientCredentialLossAndRepair(t *testing.T) {
 	for _, allowUnpaired := range []bool{false, true} {
 		name := "paired-only"
 		if allowUnpaired {
@@ -104,7 +104,7 @@ func TestReferenceClientCredentialLossAndRepair(t *testing.T) {
 	}
 }
 
-func TestReferenceServerCredentialLossPreservesClientRecord(t *testing.T) {
+func TestE2EReferenceServerCredentialLossPreservesClientRecord(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -152,7 +152,7 @@ func TestReferenceServerCredentialLossPreservesClientRecord(t *testing.T) {
 	}
 }
 
-func TestReferenceInjectedProtocolFailures(t *testing.T) {
+func TestE2EReferenceInjectedProtocolFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		message  any
@@ -227,7 +227,7 @@ func TestReferenceInjectedProtocolFailures(t *testing.T) {
 	}
 }
 
-func TestReferenceUnknownExtensionsAreIgnored(t *testing.T) {
+func TestE2EReferenceUnknownExtensionsAreIgnored(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
 	if err != nil {
@@ -269,7 +269,7 @@ func TestReferenceUnknownExtensionsAreIgnored(t *testing.T) {
 	}
 }
 
-func TestReferenceRejectsInvalidPlayerCodecHeaders(t *testing.T) {
+func TestE2EReferenceRejectsInvalidPlayerCodecHeaders(t *testing.T) {
 	for _, test := range []struct {
 		name, codec string
 		header      *string

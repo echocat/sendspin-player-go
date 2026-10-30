@@ -3,7 +3,6 @@ package integration
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,11 +11,7 @@ func TestDependabotMatchesReferencePolicy(t *testing.T) {
 	if os.Getenv("SENDSPIN_ARCHIVE_INNER") == "1" {
 		t.Skip("GitHub configuration is not part of the published SDK")
 	}
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate repository")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+	root := integrationRoot
 	data, err := os.ReadFile(filepath.Join(root, ".github", "dependabot.yml"))
 	if err != nil {
 		t.Fatal(err)
