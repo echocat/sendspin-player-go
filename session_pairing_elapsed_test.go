@@ -14,6 +14,10 @@ func TestPairingAttemptTimerExpiresByElapsedFirstMessageBudget(t *testing.T) {
 	cfg := schemaConfig()
 	cfg.Roles = []Role{Controller}
 	s, p := newSchemaSession(t, cfg)
+	// Keep the fixture's peer alive when canceling the actor: canceling their
+	// shared parent context can race the actor's result with a peer-side EOF.
+	s.ctx, s.cancel = context.WithCancel(s.ctx)
+	t.Cleanup(s.cancel)
 	schemaReceive(t, s, p, "server/hello", map[string]any{"name": "Peer"})
 	expectSchemaPayload(t, p, "client/hello", schemaHello(cfg.Roles, true, false))
 	schemaReceive(t, s, p, "server/activate", map[string]any{"activities": []string{}, "active_roles": []Role{}})

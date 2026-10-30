@@ -338,11 +338,15 @@ func TestCanceledFlushRetainsTailAndUnknownTimingFailsClosed(t *testing.T) {
 	if _, err := d.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := d.Flush(ctx); !errors.Is(err, context.DeadlineExceeded) || d.tail.IsZero() {
+	// Cancel during stop's snapshot, after Flush acquires the lock, so timer
+	// scheduling cannot let the output tail finish before cancellation.
+	p.onSnapshot = cancel
+	if err := d.Flush(ctx); !errors.Is(err, context.Canceled) || d.tail.IsZero() {
 		t.Fatal("canceled stop lost downstream tail", err)
 	}
+	p.onSnapshot = nil
 	before := time.Now()
 	if err := d.Flush(context.Background()); err != nil {
 		t.Fatal(err)

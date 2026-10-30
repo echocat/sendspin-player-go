@@ -15,6 +15,7 @@ import (
 
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/audio/internal/audiotest"
+	"github.com/echocat/sendspin-player-go/audio/internal/render"
 )
 
 // A real dynamically loaded PipeWire stream/graph, not fake native playback.
@@ -126,13 +127,17 @@ context.objects = [
 	for key, value := range map[string]string{"SENDSPIN_PIPEWIRE_E2E_PLAYBACK": "1", "SENDSPIN_PIPEWIRE_E2E_VIRTUAL": "", "SENDSPIN_PIPEWIRE_E2E_DEVICE": "sendspin-null", "SENDSPIN_PIPEWIRE_E2E_ARTIFACT_DIR": private, "SENDSPIN_PIPEWIRE_REFERENCE_FILE": reference} {
 		t.Setenv(key, value)
 	}
-	audiotest.RunReferenceServerPlaybackScenario(t, audiotest.ScenarioConfig{Prefix: "SENDSPIN_PIPEWIRE", SoftwareFixture: true, OutputFactory: func(device string) audio.Output { return privateLinkedOutput{Output{Device: device}} }})
+	audiotest.RunReferenceServerPlaybackScenario(t, audiotest.ScenarioConfig{Prefix: "SENDSPIN_PIPEWIRE", SoftwareFixture: true, OutputFactory: func(device string) audio.Output { return privateLinkedOutput{Output: Output{Device: device}, t: t} }})
 	t.Log("Independent encrypted server -> SDK PCM/FLAC -> real private PipeWire null graph; software integration only, no physical output/capture claim")
 }
 
-type privateLinkedOutput struct{ Output }
+type privateLinkedOutput struct {
+	Output
+	t *testing.T
+}
 type privateLinkedDevice struct {
 	audio.Device
+	t      *testing.T
 	cancel context.CancelFunc
 	linked <-chan error
 	once   sync.Once
@@ -152,8 +157,32 @@ func (o privateLinkedOutput) Open(ctx context.Context, f audio.Format) (audio.De
 		}
 		return nil, errors.Join(err, linkErr)
 	}
-	return &privateLinkedDevice{Device: d, cancel: cancel, linked: done}, nil
+	return &privateLinkedDevice{Device: d, t: o.t, cancel: cancel, linked: done}, nil
 }
+
+// Keep the health assertion strict, but expose the error it counts. In
+// particular, distinguish a recoverable timeline reset from a native fault or
+// cleanup cancellation without hiding any of them from the scenario wrapper.
+func (d *privateLinkedDevice) report(operation string, err error) error {
+	if err != nil && !errors.Is(err, context.Canceled) {
+		d.t.Logf("private PipeWire %s failed: %v; render diagnostics: %+v", operation, err, d.Device.(*render.Device).Diagnostics())
+	}
+	return err
+}
+
+func (d *privateLinkedDevice) Next(ctx context.Context) (time.Time, error) {
+	at, err := d.Device.Next(ctx)
+	return at, d.report("Next", err)
+}
+
+func (d *privateLinkedDevice) Write(ctx context.Context, samples []float32) error {
+	return d.report("Write", d.Device.Write(ctx, samples))
+}
+
+func (d *privateLinkedDevice) Flush(ctx context.Context) error {
+	return d.report("Flush", d.Device.Flush(ctx))
+}
+
 func (d *privateLinkedDevice) Close() error {
 	d.once.Do(func() {
 		d.cancel()
@@ -161,7 +190,7 @@ func (d *privateLinkedDevice) Close() error {
 		if errors.Is(linkErr, context.Canceled) {
 			linkErr = nil
 		}
-		d.err = errors.Join(d.Device.Close(), linkErr)
+		d.err = d.report("Close", errors.Join(d.Device.Close(), linkErr))
 	})
 	return d.err
 }
