@@ -15,51 +15,29 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Minimal public SPA/PipeWire ABI, test-only. All structs below have the same
-// layout on the supported 64-bit architectures. No headers, cgo, shell, CLI
-// polling, or host session manager is needed.
-type privateDictItem struct{ Key, Value *byte }
-type privateDict struct {
-	Flags, NItems uint32
-	Items         *privateDictItem
-}
-type privateProperties struct {
-	Dict  privateDict
-	Flags uint32
-}
-type privateHook struct{ Words [6]uintptr }
-type privateRegistryEvents struct {
-	Version, Padding uint32
-	Global, Remove   uintptr
-}
-type privateCoreEvents struct {
-	Version, Padding uint32
-	Callbacks        [9]uintptr
-}
-
 type privateGraph struct {
-	api                           *api
-	loop, context, core, registry uintptr
-	contextNew                    func(uintptr, uintptr, uintptr) uintptr
-	contextDestroy                func(uintptr)
-	connect                       func(uintptr, uintptr, uintptr) uintptr
-	disconnect                    func(uintptr) int32
-	getRegistry                   func(uintptr, uint32, uintptr) uintptr
-	registryListen                func(uintptr, *privateHook, *privateRegistryEvents, uintptr) int32
-	coreListen                    func(uintptr, *privateHook, *privateCoreEvents, uintptr) int32
-	createObject                  func(uintptr, string, string, uint32, *privateDict, uintptr) uintptr
-	propsNew                      func(uintptr) *privateProperties
-	propsSet                      func(*privateProperties, string, string) int32
-	propsFree                     func(*privateProperties)
-	proxyDestroy                  func(uintptr)
-	streamDisconnect              func(uintptr) int32
-	hook, coreHook                privateHook
-	events                        privateRegistryEvents
-	coreEvents                    privateCoreEvents
-	globals                       map[uint32]map[string]string
-	links                         map[[2]uint32]uintptr
-	err                           error // guarded by the native loop mutex, just like the maps
-	changed                       chan struct{}
+	api              *api
+	libraryVersion   string
+	loop, context    uintptr
+	core, registry   *privateInterface
+	contextNew       func(uintptr, uintptr, uintptr) uintptr
+	contextDestroy   func(uintptr)
+	connect          func(uintptr, uintptr, uintptr) *privateInterface
+	disconnect       func(*privateInterface) int32
+	coreCalls        privateCoreCalls
+	registryCalls    privateRegistryCalls
+	propsNew         func(uintptr) *privateProperties
+	propsSet         func(*privateProperties, string, string) int32
+	propsFree        func(*privateProperties)
+	proxyDestroy     func(uintptr)
+	streamDisconnect func(uintptr) int32
+	hook, coreHook   privateHook
+	events           privateRegistryEvents
+	coreEvents       privateCoreEvents
+	globals          map[uint32]map[string]string
+	links            map[[2]uint32]uintptr
+	err              error // guarded by the native loop mutex, just like the maps
+	changed          chan struct{}
 }
 
 func openPrivateGraph(ctx context.Context) (_ *privateGraph, result error) {
@@ -72,14 +50,14 @@ func openPrivateGraph(ctx context.Context) (_ *privateGraph, result error) {
 		return nil, err
 	}
 	g := &privateGraph{api: a, globals: map[uint32]map[string]string{}, links: map[[2]uint32]uintptr{}, changed: make(chan struct{}, 1)}
+	var libraryVersion func() *byte
 	for _, binding := range []struct {
 		dst  any
 		name string
 	}{
+		{&libraryVersion, "pw_get_library_version"},
 		{&g.contextNew, "pw_context_new"}, {&g.contextDestroy, "pw_context_destroy"},
 		{&g.connect, "pw_context_connect"}, {&g.disconnect, "pw_core_disconnect"},
-		{&g.getRegistry, "pw_core_get_registry"}, {&g.registryListen, "pw_registry_add_listener"},
-		{&g.coreListen, "pw_core_add_listener"}, {&g.createObject, "pw_core_create_object"},
 		{&g.propsNew, "pw_properties_new"}, {&g.propsSet, "pw_properties_set"}, {&g.propsFree, "pw_properties_free"},
 		{&g.proxyDestroy, "pw_proxy_destroy"}, {&g.streamDisconnect, "pw_stream_disconnect"},
 	} {
@@ -87,6 +65,7 @@ func openPrivateGraph(ctx context.Context) (_ *privateGraph, result error) {
 			return nil, err
 		}
 	}
+	g.libraryVersion = unix.BytePtrToString(libraryVersion())
 	defer func() {
 		if result != nil {
 			g.Close()
@@ -101,21 +80,27 @@ func openPrivateGraph(ctx context.Context) (_ *privateGraph, result error) {
 		return nil, fmt.Errorf("private graph context allocation failed")
 	}
 	g.core = g.connect(g.context, 0, 0)
-	if g.core == 0 {
+	if g.core == nil {
 		return nil, fmt.Errorf("private graph connection failed")
 	}
-	g.coreEvents.Callbacks[3] = purego.NewCallback(func(_ uintptr, id uint32, seq, code int32, message *byte) {
+	if g.coreCalls, err = privateBindCore(g.core); err != nil {
+		return nil, err
+	}
+	g.coreEvents.Error = purego.NewCallback(func(_ uintptr, id uint32, seq, code int32, message *byte) {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		g.err = fmt.Errorf("private graph native error id=%d seq=%d code=%d: %s", id, seq, code, unix.BytePtrToString(message))
 		g.notify()
 	})
-	if code := g.coreListen(g.core, &g.coreHook, &g.coreEvents, 0); code < 0 {
+	if code := g.coreCalls.addListener(g.core.Callbacks.Data, &g.coreHook, &g.coreEvents, nil); code < 0 {
 		return nil, pwError("graph core listener", code)
 	}
-	g.registry = g.getRegistry(g.core, 3, 0)
-	if g.registry == 0 {
+	g.registry = g.coreCalls.getRegistry(g.core.Callbacks.Data, 3, 0)
+	if g.registry == nil {
 		return nil, fmt.Errorf("private graph registry allocation failed")
+	}
+	if g.registryCalls, err = privateBindRegistry(g.registry); err != nil {
+		return nil, err
 	}
 	g.events.Global = purego.NewCallback(func(_ uintptr, id, permissions uint32, kind *byte, version uint32, dict *privateDict) {
 		runtime.LockOSThread()
@@ -142,7 +127,7 @@ func openPrivateGraph(ctx context.Context) (_ *privateGraph, result error) {
 		}
 		g.notify()
 	})
-	if code := g.registryListen(g.registry, &g.hook, &g.events, 0); code < 0 {
+	if code := g.registryCalls.addListener(g.registry.Callbacks.Data, &g.hook, &g.events, nil); code < 0 {
 		return nil, pwError("graph registry listener", code)
 	}
 	if code := a.loopStart(g.loop); code < 0 {
@@ -224,7 +209,7 @@ func (g *privateGraph) linkPorts() {
 			if g.err == nil {
 				// pw_properties embeds spa_dict as its first member. The native
 				// allocation stays controller-owned; create_object only borrows it.
-				proxy := g.createObject(g.core, "link-factory", "PipeWire:Interface:Link", 3, &props.Dict, 0)
+				proxy := g.coreCalls.createObject(g.core.Callbacks.Data, "link-factory", "PipeWire:Interface:Link", 3, &props.Dict, 0)
 				if proxy == 0 {
 					g.err = fmt.Errorf("private graph link factory failed for %v", pair)
 				} else {
@@ -258,9 +243,10 @@ func (g *privateGraph) Close() {
 	if g.loop != 0 {
 		g.api.loopStop(g.loop)
 	}
-	if g.core != 0 {
+	if g.core != nil {
 		g.disconnect(g.core)
-		g.core = 0
+		g.core = nil
+		g.registry = nil
 	}
 	if g.context != 0 {
 		g.contextDestroy(g.context)

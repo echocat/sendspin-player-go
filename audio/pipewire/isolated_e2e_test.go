@@ -29,6 +29,7 @@ func TestE2EPrivatePipeWire(t *testing.T) {
 		t.Fatal(privateFixture.err)
 	}
 	f := privateFixture.value
+	t.Logf("private graph: libpipewire %s, public SPA method-table dispatch, shared daemon pid=%d", f.graph.libraryVersion, f.daemon.Process.Pid)
 	for key, value := range f.environment() {
 		t.Setenv(key, value)
 	}

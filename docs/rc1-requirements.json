@@ -30217,6 +30217,10 @@
   "source_gaps": [],
   "unmapped_tests": [
     {
+      "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EClientShimArguments",
+      "reason": "Harness-binding regression: native argument forwarding, including Windows quoting and empty or spaced values. This validates the launch adapter, not an upstream conformance verdict or a protocol obligation."
+    },
+    {
       "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceSourcePCMInputLifecycleAndReconnect",
       "reason": "Explicit opt-in source@v1 extension at the unchanged specification pin. Independent source decoder verifies PCM16, lifecycle/order, timestamps, availability and reconnect with deterministic fake Input; not a promotion of frozen player-only primary assessments or physical ADC evidence. See docs/audio.md#opt-in-source-capture."
     },

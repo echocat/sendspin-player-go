@@ -54,6 +54,14 @@ var official struct {
 }
 
 func TestMain(m *testing.M) {
+	// The shim regression launches this executable as an argv capture helper,
+	// before testing parses flags or starts any official harness resources.
+	if os.Getenv("SENDSPIN_CONFORMANCE_CAPTURE_ARGS") == "1" {
+		if err := json.NewEncoder(os.Stdout).Encode(os.Args); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	official.ctx, official.cancel = context.WithTimeout(context.Background(), 15*time.Minute)
 	code := m.Run()
 	if err := closeOfficial(); err != nil {
