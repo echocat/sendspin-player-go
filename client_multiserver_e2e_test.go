@@ -59,6 +59,31 @@ func referenceArbitrationReady(t *testing.T, client *Client, ref referenceServer
 	}
 }
 
+func referenceFirstHeldRefusal(t *testing.T, client *Client, ref referenceServer, endpoint string) {
+	t.Helper()
+	eventually(t, func() bool { return referenceEventCount(t, ref, "activation_send_held", "") == 1 })
+	eventually(t, func() bool {
+		for {
+			select {
+			case event := <-client.Events():
+				if event.Kind == "disconnected" && logErrorClass(event.Err) == "concurrent_attempt" {
+					return true
+				}
+			default:
+				return false
+			}
+		}
+	})
+	ref.control(t, map[string]any{"command": "release_activation_send"})
+	eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "") > 0 })
+	// Stop the connector before inspecting counters. Native reason=None can
+	// schedule a redial; waiting for an exact counter while it runs is racy.
+	ref.control(t, map[string]any{"command": "disconnect", "url": endpoint})
+	if got := referenceEventCount(t, ref, "wire_goodbye", "concurrent_attempt"); got != 1 {
+		t.Fatalf("first refused connection: got %d wire goodbyes with concurrent_attempt, want 1", got)
+	}
+}
+
 func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -175,27 +200,7 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			if tc.holdAfterActivation {
 				// Let the client finish its refusal while the reference is still
 				// returning from server/activate, before its normal reader starts.
-				eventually(t, func() bool { return referenceEventCount(t, b, "activation_send_held", "") == 1 })
-				eventually(t, func() bool {
-					for {
-						select {
-						case event := <-client.Events():
-							if event.Kind == "disconnected" && logErrorClass(event.Err) == "concurrent_attempt" {
-								return true
-							}
-						default:
-							return false
-						}
-					}
-				})
-				b.control(t, map[string]any{"command": "release_activation_send"})
-				eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") == 1 })
-				// Stop redialing before asserting the first received refusal. A
-				// later successful retry must not mask a lost observation here.
-				b.control(t, map[string]any{"command": "disconnect", "url": endpoint})
-				if referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") != 1 {
-					t.Fatal("first refused connection lost its actual wire goodbye")
-				}
+				referenceFirstHeldRefusal(t, client, b, endpoint)
 				for _, raw := range b.control(t, map[string]any{"command": "status"})["events"].([]any) {
 					event := raw.(map[string]any)
 					if event["type"] == "wire_goodbye" {
@@ -242,7 +247,6 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 }
 
 func referenceArbitrationReadinessIncludesControllerState(t *testing.T) {
-	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cred, err := NewCredentials()
@@ -251,7 +255,7 @@ func referenceArbitrationReadinessIncludesControllerState(t *testing.T) {
 	}
 	pskA, pskB := Secret{61}, Secret{62}
 	a := startReference(t, cred, pskA, false)
-	b := startReference(t, cred, pskB, false)
+	b := startReferenceWithOptions(t, cred, pskB, false, map[string]any{"hold_after_activation": true})
 	cred.Records = []PairingRecord{{ServerID: a.id, PSK: pskA}, {ServerID: b.id, PSK: pskB}}
 	store := &MemoryStore{}
 	if err = store.Save(ctx, cred); err != nil {
@@ -291,9 +295,7 @@ func referenceArbitrationReadinessIncludesControllerState(t *testing.T) {
 	resume()
 	referenceArbitrationReady(t, client, a, false)
 	b.control(t, map[string]any{"command": "connect", "url": endpoint})
-	eventually(t, func() bool { return referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") == 1 })
-	eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") == 1 })
-	b.control(t, map[string]any{"command": "disconnect", "url": endpoint})
+	referenceFirstHeldRefusal(t, client, b, endpoint)
 	referenceArbitrationReady(t, client, a, false)
 	persisted, err := store.Load(ctx)
 	if err != nil {
