@@ -32,11 +32,18 @@ func decodeControllerState(data []byte) (ControllerState, error) {
 // ignore rule. Unoffered commands cannot make their argument bodies actionable.
 // Known command arguments remain strictly typed and conditionally required.
 func decodePlayerCommand(data []byte) (string, any, error) {
+	return decodeOfferedPlayerCommand(data, []string{"volume", "mute", "set_output_delay"})
+}
+
+func decodeOfferedPlayerCommand(data []byte, offered []string) (string, any, error) {
 	var discriminator struct {
 		Command string `json:"command"`
 	}
 	if err := protocol.Decode(data, &discriminator, "command"); err != nil {
 		return "", nil, err
+	}
+	if !slices.Contains(offered, discriminator.Command) {
+		return "", nil, nil
 	}
 	switch discriminator.Command {
 	case "volume", "mute", "set_output_delay":

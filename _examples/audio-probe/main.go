@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
-	"github.com/echocat/sendspin-player-go/audio/oto"
+	"github.com/echocat/sendspin-player-go/audio/native"
 	"github.com/echocat/sendspin-player-go/internal/monotime"
 	log "github.com/echocat/slf4g"
 	_ "github.com/echocat/slf4g/native"
@@ -51,13 +51,16 @@ type report struct {
 }
 
 func output(backend string) (audio.Output, []nativeDevice, string, error) {
-	if backend == "oto" {
-		return oto.Output{AllowApproximate: true}, nil, "estimated; software-only flush", nil
+	selected := native.Backend(backend)
+	if backend == "native" {
+		selected = native.BackendAuto
 	}
-	if backend == "portaudio" {
-		return portaudioOutput()
+	switch selected {
+	case native.BackendAuto, native.BackendPipeWire, native.BackendALSA, native.BackendWASAPI, native.BackendCoreAudio, native.BackendNoop:
+		return native.Output{Backend: selected}, nil, "native driver timing (noop is virtual); not a physical measurement", nil
+	default:
+		return nil, nil, "", fmt.Errorf("unknown backend %q", backend)
 	}
-	return nil, nil, "", fmt.Errorf("unknown backend %q", backend)
 }
 
 func smoke(ctx context.Context, o audio.Output, cycles int, r *report) error {
@@ -163,7 +166,7 @@ func writeReport(path string, r report) error {
 }
 
 func main() {
-	backend := flag.String("backend", "oto", "oto or portaudio")
+	backend := flag.String("backend", "native", "native, pipewire, alsa, wasapi, coreaudio, or explicit noop")
 	live := flag.Bool("run-silence", false, "Explicitly open the default output and write only silence")
 	cycles := flag.Int("cycles", 3, "Open/flush/close/reopen cycles (1..20)")
 	path := flag.String("output", "", "JSON result path; empty writes stdout")
@@ -177,9 +180,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if *backend != "oto" && *backend != "portaudio" {
-		r.Status, r.Error = "fail", "backend must be oto or portaudio"
-	} else if *cycles < 1 || *cycles > 20 {
+	if *cycles < 1 || *cycles > 20 {
 		r.Status, r.Error = "fail", "cycles must be in 1..20"
 	} else {
 		o, devices, timing, err := output(*backend)

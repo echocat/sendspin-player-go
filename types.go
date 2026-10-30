@@ -23,6 +23,7 @@ const (
 	ArtworkRole    Role = "artwork@v1"
 	VisualizerRole Role = "visualizer@v1"
 	ColorRole      Role = "color@v1"
+	SourceRole     Role = "source@v1"
 )
 
 type DeviceInfo struct {
@@ -59,8 +60,19 @@ type Config struct {
 	DeviceInfo    *DeviceInfo
 	Store         Store
 	Output        audio.Output
-	Roles         []Role
-	Formats       []codec.Format
+	// PlayerControl selects host-managed volume/mute and immutable unity gain.
+	// Nil retains legacy software gain and persistence. Non-nil, even empty,
+	// never falls back to software control; bind a host target after New.
+	PlayerControl *PlayerControlConfig
+	// Input is used only with explicitly configured SourceRole, and only after
+	// an active, available, authorized server requests source start. It is never
+	// routed to Output. AllowUnpaired defaults to false, also for sources.
+	Input audio.Input
+	// SourceFormat selects the capture format. Zero defaults to 48 kHz stereo.
+	// Upstream encoding is PCM16; supported capture rates are 8–192 kHz, 1–8 channels.
+	SourceFormat audio.Format
+	Roles        []Role
+	Formats      []codec.Format
 	// Decoders adds or replaces codec factories. Defaults contain PCM, FLAC and
 	// Opus. Advertise only formats supported by the configured factories.
 	Decoders           map[string]codec.Factory
@@ -76,6 +88,8 @@ type Config struct {
 	CipherSuite        string
 	HandshakeTimeout   time.Duration
 	DisableDiscovery   bool
+	// CodePairing enables optional PIN methods. Nil keeps PSK-only behavior.
+	CodePairing *CodePairingConfig
 	// Logger overrides the package's slf4g facade for this Client. Nil uses the
 	// application's provider. The SDK never installs an output implementation.
 	// Logging runs synchronously outside Client locks; sinks must return promptly.
@@ -93,6 +107,19 @@ type Config struct {
 }
 
 func (c *Config) defaults() error {
+	if err := c.copyPlayerControl(); err != nil {
+		return err
+	}
+	if c.CodePairing != nil {
+		copy := *c.CodePairing
+		c.CodePairing = &copy
+		if copy.Static && copy.Display != nil {
+			return errors.New("sendspin: RC1 permits at most one PIN method per Client")
+		}
+		if !copy.Static && copy.Display == nil {
+			return errors.New("sendspin: empty code-pairing configuration")
+		}
+	}
 	if c.Specification == "" {
 		c.Specification = Specification
 	}
@@ -127,10 +154,21 @@ func (c *Config) defaults() error {
 	}
 	seen := map[Role]bool{}
 	for _, role := range c.Roles {
-		if !slices.Contains([]Role{Player, Controller, MetadataRole, ArtworkRole, VisualizerRole, ColorRole}, role) || seen[role] {
+		if !slices.Contains([]Role{Player, Controller, MetadataRole, ArtworkRole, VisualizerRole, ColorRole, SourceRole}, role) || seen[role] {
 			return errors.New("sendspin: unsupported or duplicate role")
 		}
 		seen[role] = true
+	}
+	if seen[SourceRole] {
+		if c.Input == nil {
+			return errors.New("sendspin: source requires an explicit audio input")
+		}
+		if c.SourceFormat == (audio.Format{}) {
+			c.SourceFormat = audio.Format{SampleRate: 48000, Channels: 2}
+		}
+		if c.SourceFormat.SampleRate < 8000 || c.SourceFormat.SampleRate > 192000 || c.SourceFormat.Channels < 1 || c.SourceFormat.Channels > 8 {
+			return errors.New("sendspin: invalid source capture format")
+		}
 	}
 	if c.BufferCapacity == 0 {
 		c.BufferCapacity = 4 << 20
@@ -318,5 +356,10 @@ type Snapshot struct {
 	Controller    *ControllerState
 	Volume        int
 	Muted         bool
+	// Known flags distinguish unknown external state from zero/false. Legacy
+	// software state is always known. PlayerControl is nil in legacy mode.
+	VolumeKnown   bool
+	MutedKnown    bool
+	PlayerControl *PlayerControlSnapshot
 	OutputDelayMS int
 }

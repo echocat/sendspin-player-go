@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+var backendHardwareTests = []string{"TestNativeLoopback", "TestReferenceServerPlaybackScenario", "TestReferenceServerNativeInputScenario"}
+
 type EvidenceReport struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
@@ -116,7 +118,13 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 	case "full":
 		required = FullSuites
 	case "native":
-		required = []string{"portaudio", "native-example"}
+		required = []string{"desktop-audio", "examples"}
+	case "alsa":
+		required = []string{"alsa"}
+	case "desktop-audio":
+		required = []string{"desktop-audio"}
+	case "desktop-audio-e2e", "alsa-e2e":
+		required = []string{options.Profile}
 	default:
 		return Report{}, fmt.Errorf("unknown evidence profile %q", options.Profile)
 	}
@@ -142,7 +150,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 				return nil
 			}
 			pathSuite := filepath.Base(filepath.Dir(filepath.Dir(path)))
-			if !slices.Contains(append(slices.Clone(FullSuites), "portaudio", "native-example"), pathSuite) {
+			if !slices.Contains(append(slices.Clone(FullSuites), BackendSuites...), pathSuite) {
 				return nil
 			}
 			manifest, directory, err := readManifest(path)
@@ -196,8 +204,20 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 					if result.Status == "fail" || result.Status == "incomplete" {
 						value.status = "fail"
 					}
+					// Tagged backend suites may compile successfully on hosted CI
+					// while every hardware opt-in is skipped. Never call that a pass.
+					if (manifest.Suite == "desktop-audio-e2e" || manifest.Suite == "alsa-e2e") && slices.Contains(backendHardwareTests, result.Name) && result.Status == "skip" && value.status == "pass" {
+						value.status = "skip"
+					}
 				}
 				value.results = append(value.results, results...)
+			}
+			if (manifest.Suite == "desktop-audio-e2e" || manifest.Suite == "alsa-e2e") && value.status == "pass" {
+				for _, name := range backendHardwareTests {
+					if !slices.ContainsFunc(value.results, func(r Result) bool { return r.Name == name && r.Status == "pass" }) {
+						value.status = "not-run"
+					}
+				}
 			}
 			suites[manifest.Suite] = value
 			return nil
@@ -208,7 +228,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 	} else if !os.IsNotExist(err) {
 		return report, err
 	}
-	allSuites := append(slices.Clone(FullSuites), "portaudio", "native-example")
+	allSuites := append(slices.Clone(FullSuites), BackendSuites...)
 	for _, suite := range allSuites {
 		value, ok := suites[suite]
 		status := "not-run"

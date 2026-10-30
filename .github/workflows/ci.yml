@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Full validation or native desktop diagnostics only (not full CI)
+        type: choice
+        default: full
+        options: [full, native-desktop]
 permissions:
   contents: read
 concurrency:
@@ -11,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   go:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -33,12 +40,26 @@ jobs:
       - run: go mod tidy -diff
       - name: Record CGO-free example tests
         run: go run ./internal/specauditcmd run --suite examples
-      - name: Build the Oto-only example without CGO
+      - name: Build offline WAV analysis tool without CGO or audio libraries
+        working-directory: _examples/loopback
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o ../../var/bin/loopback/ .
+      - name: Test ALSA purego ABI/null PCM or platform stub without hardware
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 ./audio/alsa
+      - name: Test native selector without CGO or hardware
+        working-directory: audio/native
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 ./...
+      - name: Build the native player without CGO or a C compiler
         working-directory: _examples/player
         env:
           CGO_ENABLED: '0'
         run: |
-          go build -o ../../var/bin/oto/ .
+          go build -o ../../var/bin/native/ .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -46,6 +67,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   e2e:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -68,11 +90,13 @@ jobs:
           path: var/soak
           if-no-files-found: warn
   quality:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
       - run: mise run vuln
+      - run: mise run audit:verify-cpace
       - run: mise run test:fuzz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -81,6 +105,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   lint:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +116,7 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
       - run: mise run lint
   mdns:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -103,6 +129,7 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   conformance:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -117,6 +144,7 @@ jobs:
             var/conformance
           if-no-files-found: warn
   time-filter-reference:
+    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -137,24 +165,77 @@ jobs:
           path: var/audit/evidence
           if-no-files-found: warn
   native-build:
+    if: inputs.scope != 'native-desktop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
-      - run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
       - run: mise run lint:native
-      - run: mise run test:native
       - run: mise run build:example
+  alsa:
+    if: inputs.scope != 'native-desktop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - run: sudo apt-get update && sudo apt-get install -y libasound2t64
+      - run: mise run lint:alsa
+      - run: mise run test:alsa
+      - name: Tagged output and Source/input tests (visible SKIP without device ENV)
+        run: mise run test:alsa:e2e:optin
+      - name: Independent-server software scenario (virtual output, not native evidence)
+        run: mise run test:alsa:e2e:virtual
+      - run: go run ./internal/specauditcmd report --profile alsa --output var/audit/alsa
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: spec-evidence-native-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
+          name: spec-evidence-alsa-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/evidence
+            var/audit/alsa
+          if-no-files-found: warn
+  desktop-audio:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
+      - run: mise run lint:desktop-audio
+      - run: mise run test:desktop-audio
+      - name: Tagged output, marker loopback and Source/input (visible SKIP without device ENV)
+        run: mise run test:desktop-audio:e2e
+      - if: matrix.os == 'ubuntu-latest'
+        name: Source helper with fake input (software only, not native capture evidence)
+        run: mise run test:desktop-audio:source:fake
+      - if: runner.os == 'Linux'
+        run: mise run test:pipewire:isolated
+      - if: runner.os == 'Linux'
+        name: Independent server through private PipeWire graph (software integration only)
+        run: mise run test:pipewire:e2e:isolated
+      - run: go run ./internal/specauditcmd report --profile desktop-audio --output var/audit/desktop-audio
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: spec-evidence-desktop-audio-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: |
+            var/audit/evidence
+            var/audit/desktop-audio
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: native-desktop-private-pipewire-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: var/platform-validation/native-desktop/pipewire
           if-no-files-found: warn
   spec-report:
     name: RC1 traceability (not certification)
-    if: always()
-    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build]
+    if: always() && inputs.scope != 'native-desktop'
+    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build, alsa, desktop-audio]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -176,6 +257,12 @@ jobs:
       - name: Generate and gate native build/callback evidence (not physical measurements)
         if: always()
         run: go run ./internal/specauditcmd report --profile native --evidence var/audit/ci --output var/audit/native --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Gate separate Linux ALSA purego ABI/null-PCM evidence (no physical measurements)
+        if: always()
+        run: go run ./internal/specauditcmd report --profile alsa --evidence var/audit/ci --output var/audit/alsa --goos linux --goarch amd64 --go-version go1.27.3
+      - name: Gate separate direct desktop clock/callback evidence (no physical measurements)
+        if: always()
+        run: go run ./internal/specauditcmd report --profile desktop-audio --evidence var/audit/ci --output var/audit/desktop-audio --goos linux --goarch amd64 --go-version go1.27.3
       - name: Publish traceability summary
         if: always()
         shell: bash
@@ -192,4 +279,6 @@ jobs:
             var/audit/report.md
             var/audit/summary.md
             var/audit/native
+            var/audit/alsa
+            var/audit/desktop-audio
           if-no-files-found: warn

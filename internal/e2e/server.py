@@ -11,9 +11,8 @@ import hashlib
 import json
 import logging
 import struct
-
 from aiohttp import web
-from aiosendspin.models.types import ConnectionReason, PairMethod
+from aiosendspin.models.types import ConnectionReason, PairMethod, PairingCodeFormat
 from aiosendspin.noise.keys import Identity, b64url_decode, psk_id_for
 from aiosendspin.noise.pairing import PairingAttempt, PairingAbortError
 from aiosendspin.noise.trust_store import (
@@ -28,9 +27,12 @@ from aiosendspin.server.server import (
     ClientDisconnectedEvent,
     SendspinServer,
 )
-from media import MediaControls
+
 from mdns import MDNSPeer
+from media import MediaControls
 from pairing_observer import PairingObserver
+from source_controls import SourceControls
+from weak_playback import WeakPlayback
 
 
 class ControlledStore(InMemoryServerPairingStore):
@@ -123,11 +125,14 @@ async def main(config_path):
 
     server.add_event_listener(observe_event)
     media = MediaControls(server)
+    sources = SourceControls(server, client_id) if config.get("observe_source", False) else None
+    weak = WeakPlayback(config["weak_reference_path"]) if "weak_reference_path" in config else None
     stream = None
     pump_task = None
     pump_stop = None
     pump_samples = 0
     stop = asyncio.Event()
+    operator_codes = asyncio.Queue()
     mdns = MDNSPeer(server, config["mdns"], client_id) if "mdns" in config else None
 
     async def control(request):
@@ -135,6 +140,23 @@ async def main(config_path):
         command = await request.json()
         client = server.get_client(client_id)
         kind = command["command"]
+        if sources is not None and kind in sources.commands:
+            return web.json_response(await sources.run(client, command))
+        if kind in ("weak_start", "weak_stop", "weak_disconnect", "weak_status"):
+            if weak is None:
+                raise web.HTTPConflict(text="weak reference scenario is not configured")
+            if kind == "weak_start":
+                return web.json_response(await weak.start(client))
+            if kind == "weak_stop":
+                return web.json_response(await weak.stop(client))
+            if kind == "weak_status":
+                player = client.role("player@v1") if client is not None and client.is_connected else None
+                selected = player.preferred_codec if player is not None else None
+                return web.json_response({"codec": selected.value if selected is not None else None, "source_frames": weak.frames})
+            if client is None or client.connection is None or weak.task is not None:
+                raise web.HTTPConflict(text="disconnect needs a connected client and stopped producer")
+            await client.connection.disconnect()
+            return web.json_response({"ok": True})
         if kind == "pump_start":
             if client is None or not client.is_connected or pump_task is not None:
                 raise web.HTTPConflict(text="pump needs one connected client and no existing pump")
@@ -194,6 +216,21 @@ async def main(config_path):
                         client_id=client_id,
                     ),
                 )
+            except PairingAbortError as error:
+                return web.json_response({"pair_abort": error.reason.value})
+        elif kind == "submit_code":
+            # Private loopback operator input; never put the code into events.
+            operator_codes.put_nowait(command["code"])
+        elif kind == "pair_code":
+            method = PairMethod(command["method"])
+            async def provide_code():
+                return await operator_codes.get()
+            try:
+                await server.initiate_pairing(client_id, PairingAttempt(
+                    method=method, pairing_code_provider=provide_code,
+                    pairing_format=PairingCodeFormat.DIGITS if method is PairMethod.DYNAMIC_PAIRING_CODE else None,
+                    on_pair_pending=lambda _message: events.append({"type": "code_pending"}),
+                ))
             except PairingAbortError as error:
                 return web.json_response({"pair_abort": error.reason.value})
         elif kind == "release_pairing":
@@ -320,6 +357,8 @@ async def main(config_path):
     try:
         await stop.wait()
     finally:
+        if weak is not None:
+            await weak.close()
         if pump_task is not None:
             pump_task.cancel()
             await asyncio.gather(pump_task, return_exceptions=True)
@@ -327,6 +366,8 @@ async def main(config_path):
         if mdns is not None:
             await mdns.close()
         await server.close()
+        if sources is not None:
+            await sources.close()
         await runner.cleanup()
         if pairing_observer is not None:
             pairing_observer.close()

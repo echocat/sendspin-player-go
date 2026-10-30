@@ -21,6 +21,10 @@ type MemoryStore struct {
 
 func cloneCredentials(c Credentials) Credentials {
 	c.Records = append([]PairingRecord(nil), c.Records...)
+	if c.StaticPairingPIN != nil {
+		pin := *c.StaticPairingPIN
+		c.StaticPairingPIN = &pin
+	}
 	return c
 }
 func (s *MemoryStore) Load(ctx context.Context) (Credentials, error) {

@@ -29,6 +29,7 @@ type session struct {
 	cancel                                         context.CancelFunc
 	done                                           chan struct{}
 	requests                                       chan request
+	controlUpdates                                 chan struct{}
 	displace                                       chan string
 	channel                                        *wire.Channel
 	filter                                         *timesync.Filter
@@ -46,6 +47,7 @@ type session struct {
 	pendingPSK                          *Secret
 	pairingDeadline                     time.Time
 	pairingDiscard                      bool
+	codePairing                         *codeAttempt
 	active                              map[string]Role
 	streams                             map[string]bool
 	decoder                             codec.AudioDecoder
@@ -64,11 +66,12 @@ type session struct {
 	pendingMetadata                     *Metadata
 	pendingColors                       *Colors
 	media                               mediaState
+	source                              sourceState
 }
 
 func newSession(c *Client, ctx context.Context, cancel context.CancelFunc) *session {
 	started := monotime.Now()
-	return &session{client: c, ctx: ctx, cancel: cancel, done: make(chan struct{}), requests: make(chan request), displace: make(chan string, 1), filter: timesync.New(), epoch: started, activationDeadline: started.Add(min(c.cfg.HandshakeTimeout, 30*time.Second)), active: map[string]Role{}, streams: map[string]bool{}, willing: true, burstLeft: 8}
+	return &session{client: c, ctx: ctx, cancel: cancel, done: make(chan struct{}), requests: make(chan request), controlUpdates: make(chan struct{}, 1), displace: make(chan string, 1), filter: timesync.New(), epoch: started, activationDeadline: started.Add(min(c.cfg.HandshakeTimeout, 30*time.Second)), active: map[string]Role{}, streams: map[string]bool{}, willing: true, burstLeft: 8}
 }
 func (s *session) now() int64         { return monotime.Since(s.epoch).Microseconds() + 1 }
 func (s *session) has(role Role) bool { return slices.Contains(s.state.ActiveRoles, role) }
@@ -92,12 +95,19 @@ func (c *Client) Snapshot() Snapshot {
 	cred := c.credentials
 	c.mu.Unlock()
 	if s == nil {
-		return Snapshot{Volume: cred.Volume, Muted: cred.Muted, OutputDelayMS: cred.OutputDelayMS}
+		state := Snapshot{Volume: cred.Volume, Muted: cred.Muted, VolumeKnown: true, MutedKnown: true, OutputDelayMS: cred.OutputDelayMS}
+		if c.playerControl != nil {
+			c.playerControl.apply(&state)
+		}
+		return state
 	}
 	s.snapshotMu.RLock()
 	defer s.snapshotMu.RUnlock()
 	var state Snapshot
 	_ = json.Unmarshal(s.snapshot, &state)
+	if c.playerControl != nil {
+		c.playerControl.apply(&state)
+	}
 	return state
 }
 
@@ -162,6 +172,8 @@ func (s *session) run() error {
 	defer func() { cancel(); <-readerDone }()
 	var engineDone chan error
 	defer func() {
+		// Invalidate host writes before waiting for any audio/reader cleanup.
+		s.client.endPlayerControlSession(s)
 		if s.engine != nil {
 			cancel()
 			<-engineDone // Cleanup: preserve the actor's primary result.
@@ -173,9 +185,14 @@ func (s *session) run() error {
 	// starting a second full timeout here could keep a connection for 60s.
 	activationTimeout := time.NewTimer(monotime.Until(s.activationDeadline))
 	defer activationTimeout.Stop()
+	// Cancel capture before joining unrelated reader/output workers on exit.
+	defer s.closeSource()
 	for {
 		select {
 		case <-ctx.Done():
+			if s.source.capture != nil {
+				s.source.capture.cancel()
+			}
 			s.shutdownGoodbye()
 			return ctx.Err()
 		case reason := <-s.displace:
@@ -192,6 +209,10 @@ func (s *session) run() error {
 			return fmt.Errorf("sendspin: audio output: %w", err)
 		case err := <-pingError:
 			return err
+		case <-s.source.wake:
+			if err := s.advanceSource(); err != nil {
+				return err
+			}
 		case <-activationTimeout.C:
 			if !s.activated {
 				return fmt.Errorf("%w: activation timeout", protocol.ErrProtocol)
@@ -205,8 +226,12 @@ func (s *session) run() error {
 				return err
 			}
 			if s.admitted && s.engine == nil && slices.Contains(s.client.cfg.Roles, Player) {
-				s.engine = playback.New(s.client.cfg.Output, s.client.cfg.BufferCapacity, s.local)
-				s.engine.State(s.state.Volume, s.state.Muted, s.state.OutputDelayMS)
+				if s.client.playerControl != nil {
+					s.engine = playback.NewUnityGain(s.client.cfg.Output, s.client.cfg.BufferCapacity, s.local)
+				} else {
+					s.engine = playback.New(s.client.cfg.Output, s.client.cfg.BufferCapacity, s.local)
+				}
+				s.engineState()
 				engineDone = make(chan error, 1)
 				engine, done := s.engine, engineDone
 				go func() { done <- engine.Run(ctx) }()
@@ -215,6 +240,12 @@ func (s *session) run() error {
 			case ack <- struct{}{}:
 			case <-ctx.Done():
 				return ctx.Err()
+			}
+		case <-s.controlUpdates:
+			if s.activated && !s.awaitingActivation && s.has(Player) {
+				if err := s.sendState(); err != nil {
+					return err
+				}
 			}
 		case r := <-s.requests:
 			if err := r.ctx.Err(); err != nil {
@@ -235,6 +266,9 @@ func (s *session) run() error {
 			if _, err := s.checkPairingTimeout(monotime.Now()); err != nil {
 				return err
 			}
+			if err := s.advanceCodePairing(); err != nil {
+				return err
+			}
 			if s.timeOutstanding != 0 && s.now()-s.timeOutstanding > 10_000_000 {
 				return errors.New("sendspin: clock synchronization timeout")
 			}
@@ -251,18 +285,31 @@ func (s *session) run() error {
 			if err := s.scheduled(); err != nil {
 				return err
 			}
+			if err := s.advanceSource(); err != nil {
+				return err
+			}
 		}
 	}
 }
 
 func (s *session) send(kind string, payload any) error {
-	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	ctx, cancel := s.applicationWriteContext(kind)
 	defer cancel()
 	err := s.channel.JSON(ctx, kind, payload)
 	if err != nil {
 		s.fatal = err
 	}
 	return err
+}
+
+func (s *session) applicationWriteContext(kind string) (context.Context, context.CancelFunc) {
+	deadline := monotime.Now().Add(5 * time.Second)
+	// Pending does not start the attempt. Abort must remain writable after its
+	// expiry; all actual pairing transmissions share the inclusive attempt cap.
+	if strings.HasPrefix(kind, "client/pair-") && kind != "client/pair-pending" && !s.pairingDeadline.IsZero() && s.pairingDeadline.Before(deadline) {
+		deadline = s.pairingDeadline
+	}
+	return context.WithDeadline(s.ctx, deadline)
 }
 func (s *session) goodbye(reason string) {
 	if !validGoodbyeReason(reason) {
@@ -298,6 +345,7 @@ func validGoodbyeReason(reason string) bool {
 }
 
 func (s *session) displaced(reason string) error {
+	s.client.endPlayerControlSession(s)
 	if s.awaitingActivation {
 		// Re-handshake permits no application writes before the activation
 		// under the new keys. Retain the admission decision, but defer goodbye.
@@ -329,12 +377,16 @@ func (s *session) dispatch(frame []byte) error {
 		if err != nil {
 			return err
 		}
+		if err := s.sourceHello(m.Payload); err != nil {
+			return err
+		}
 		s.state.ServerID, s.state.ServerName = s.channel.ServerID, hello.Name
 		s.state.ServerLanguages = hello.Languages
 		s.client.mu.Lock()
 		cred := s.client.credentials
 		s.client.mu.Unlock()
 		s.state.Volume, s.state.Muted, s.state.OutputDelayMS = cred.Volume, cred.Muted, cred.OutputDelayMS
+		s.syncPlayerControl()
 		s.hello = true
 		return s.sendHello()
 	}
@@ -354,15 +406,14 @@ func (s *session) dispatch(frame []byte) error {
 		return nil
 	}
 	switch m.Type {
-	case "server/hello", "server/init", "client/hello", "client/init", "server/error", "client/time", "client/state", "client/command", "client/leave", "client/goodbye", "client/pair-init", "client/pair-finalize", "client/pair-pending", "client/pair-auth", "client/pair-confirm", "client/pair-retry":
+	case "server/hello", "server/init", "client/hello", "client/init", "server/error", "client/time", "client/state", "client/command", "client/leave", "client/goodbye", "client/pair-init", "client/pair-finalize", "client/pair-pending", "client/pair-auth", "client/pair-confirm", "client/pair-retry", "client-stream/start", "client-stream/end":
 		return protocol.ErrProtocol
 	case "server/pair-init", "server/pair-auth", "server/pair-confirm":
-		// These messages belong to code-based methods, never the offered PSK
-		// method. The in-flight discard exception was handled above.
-		return protocol.ErrProtocol
+		return s.codeMessage(m.Type, m.Payload)
 	case "server/activate":
 		return s.activate(m.Payload)
 	case "noise/handshake":
+		s.client.endPlayerControlSession(s)
 		ctx, cancel := context.WithTimeout(s.ctx, s.client.cfg.HandshakeTimeout)
 		defer cancel()
 		if err = s.channel.Rehandshake(ctx, m.Payload); err != nil {
@@ -398,7 +449,7 @@ func (s *session) dispatch(frame []byte) error {
 	case "server/pair-finalize":
 		return s.finalizePairing(m.Payload)
 	case "pair/abort":
-		if s.pairingDiscard || s.pendingPSK == nil {
+		if s.pairingDiscard || (s.pendingPSK == nil && s.codePairing == nil) {
 			return nil
 		}
 		var abort struct {
@@ -409,6 +460,9 @@ func (s *session) dispatch(frame []byte) error {
 		}
 		if !slices.Contains([]string{"user_cancelled", "pairing_code_mismatch"}, abort.Reason) {
 			return protocol.ErrProtocol
+		}
+		if abort.Reason == "user_cancelled" {
+			s.closePairingWindow()
 		}
 		s.endPairing(true)
 		return nil
@@ -432,6 +486,15 @@ func (s *session) dispatch(frame []byte) error {
 func (s *session) sendHello() error {
 	cfg := s.client.cfg
 	p := map[string]any{"name": cfg.Name, "supported_roles": cfg.Roles, "supported_pair_methods": map[string]any{"pairing_psk": map[string]any{}}, "unpaired_access": map[string]bool{"enabled": cfg.AllowUnpaired}}
+	if cfg.CodePairing != nil {
+		methods := p["supported_pair_methods"].(map[string]any)
+		if cfg.CodePairing.Static {
+			methods["static_pairing_code"] = map[string]any{"locations": []string{"operator"}}
+		}
+		if cfg.CodePairing.Display != nil {
+			methods["dynamic_pairing_code"] = map[string]any{"out_channels": []string{"display"}, "formats": []string{"digits"}}
+		}
+	}
 	if cfg.DeviceInfo != nil {
 		p["device_info"] = cfg.DeviceInfo
 	}
@@ -440,6 +503,9 @@ func (s *session) sendHello() error {
 	}
 	if slices.Contains(cfg.Roles, VisualizerRole) {
 		p["visualizer@v1_support"] = map[string]int{"buffer_capacity": cfg.VisualizerCapacity}
+	}
+	if slices.Contains(cfg.Roles, SourceRole) {
+		p["source@v1_support"] = map[string]any{}
 	}
 	return s.send("client/hello", p)
 }
@@ -473,6 +539,8 @@ func (s *session) activate(data []byte) error {
 	// including its shape. Defer validation rather than weakening Decode's
 	// rejection of null/incorrect types for other known fields.
 	pairingSupported := true
+	method := ""
+	pairFormat := ""
 	if seen["pairing"] {
 		var pairing struct {
 			Method string  `json:"method"`
@@ -485,6 +553,14 @@ func (s *session) activate(data []byte) error {
 			return protocol.ErrProtocol
 		}
 		pairingSupported = pairing.Method == "pairing_psk" && s.channel.Category == "pr" && pairing.Format == nil
+		method = pairing.Method
+		if pairing.Format != nil {
+			pairFormat = *pairing.Format
+		}
+		if s.channel.Category == "sn" && s.client.cfg.CodePairing != nil {
+			cfg := s.client.cfg.CodePairing
+			pairingSupported = (method == "static_pairing_code" && cfg.Static && pairing.Format == nil) || (method == "dynamic_pairing_code" && cfg.Display != nil && pairFormat == "digits")
+		}
 	}
 	roles := s.state.ActiveRoles
 	if a.Roles != nil {
@@ -541,6 +617,11 @@ func (s *session) activate(data []byte) error {
 		if active[family] == s.active[family] {
 			continue
 		}
+		if family == "source" {
+			if err := s.stopSource(); err != nil {
+				return err
+			}
+		}
 		if s.streams[family] {
 			return protocol.ErrProtocol
 		}
@@ -556,6 +637,12 @@ func (s *session) activate(data []byte) error {
 	s.client.mu.Unlock()
 	s.active, s.state.ActiveRoles = active, slices.Clone(roles)
 	s.activated, s.awaitingActivation = true, false
+	if s.has(Player) {
+		s.client.setPlayerControlSession(s)
+	} else {
+		s.client.endPlayerControlSession(s)
+	}
+	s.syncPlayerControl()
 	s.publish()
 	s.client.logger().With("active_roles", len(roles)).With("playback", seen["playback"]).With("pairing", seen["pairing"]).Debug("Sendspin activation accepted")
 	if s.pendingDisplacement != "" {
@@ -568,7 +655,17 @@ func (s *session) activate(data []byte) error {
 		return s.failGoodbye(s.pendingDisplacement)
 	}
 	if seen["pairing"] {
+		s.endPairing(false)
 		s.pairingDiscard = false
+		if method != "pairing_psk" {
+			if err := s.startCodePairing(method); err != nil {
+				return err
+			}
+			if len(roles) > 0 {
+				return s.sendState()
+			}
+			return nil
+		}
 		var psk Secret
 		if _, err := rand.Read(psk[:]); err != nil {
 			return err
@@ -676,6 +773,9 @@ func (c *Client) admit(s *session, rank int, incomingPairing bool) error {
 }
 
 func (s *session) finalizePairing(data []byte) error {
+	if s.codePairing != nil && s.codePairing.state != "finalize" {
+		return protocol.ErrProtocol
+	}
 	if expired, err := s.checkPairingTimeout(monotime.Now()); expired || err != nil {
 		return err
 	}
@@ -721,6 +821,9 @@ func (s *session) finalizePairing(data []byte) error {
 		return err
 	}
 	if err == nil {
+		if s.codePairing != nil {
+			s.closePairingWindow()
+		}
 		s.endPairing(false)
 		s.client.emit(Event{Kind: "paired", ServerID: s.channel.ServerID})
 		s.client.logger().Info("Sendspin pairing record persisted")
@@ -729,11 +832,26 @@ func (s *session) finalizePairing(data []byte) error {
 }
 
 func (s *session) sendState() error {
-	ready := s.willing && (!s.has(Player) || s.filter.Ready())
+	s.syncPlayerControl()
+	ready := s.willing && (!(s.has(Player) || s.has(SourceRole)) || s.filter.Ready())
+	if !ready {
+		if err := s.stopSource(); err != nil {
+			return err
+		}
+	}
 	s.state.Available = ready
 	p := map[string]any{"available": ready}
+	if s.has(SourceRole) {
+		p["source"] = map[string]any{}
+	}
 	if s.has(Player) {
-		player := map[string]any{"volume": s.state.Volume, "muted": s.state.Muted, "output_delay_ms": s.state.OutputDelayMS, "required_lead_time_ms": s.client.cfg.RequiredLeadTime.Milliseconds(), "min_buffer_ms": s.client.cfg.MinBuffer.Milliseconds(), "supported_commands": []string{"volume", "mute", "set_output_delay"}}
+		player := map[string]any{"output_delay_ms": s.state.OutputDelayMS, "required_lead_time_ms": s.client.cfg.RequiredLeadTime.Milliseconds(), "min_buffer_ms": s.client.cfg.MinBuffer.Milliseconds(), "supported_commands": playerCommands(s.state)}
+		if s.state.VolumeKnown {
+			player["volume"] = s.state.Volume
+		}
+		if s.state.MutedKnown {
+			player["muted"] = s.state.Muted
+		}
 		if s.preferred != nil {
 			player["format"] = s.preferred
 		}
@@ -745,9 +863,7 @@ func (s *session) sendState() error {
 	if s.has(VisualizerRole) {
 		p["visualizer"] = s.client.cfg.Visualizer
 	}
-	if s.engine != nil {
-		s.engine.State(s.state.Volume, s.state.Muted, s.state.OutputDelayMS)
-	}
+	s.engineState()
 	s.publish()
 	return s.send("client/state", p)
 }
@@ -797,7 +913,7 @@ func (s *session) timeSample(data []byte) error {
 		// the steady-state ten-second idle period. The actor's 5-ms ticker still
 		// bounds the request rate; no timestamp/uncertainty is manufactured.
 	}
-	ready := s.willing && (!s.has(Player) || s.filter.Ready())
+	ready := s.willing && (!(s.has(Player) || s.has(SourceRole)) || s.filter.Ready())
 	if ready != s.state.Available && len(s.active) > 0 {
 		return s.sendState()
 	}

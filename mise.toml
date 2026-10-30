@@ -31,23 +31,48 @@ run = "go mod tidy"
 
 [tasks."format:examples"]
 description = "Format and tidy all independent example modules"
-depends = ["format:examples:player", "format:examples:audio-probe"]
+depends = ["format:examples:player", "format:examples:audio-probe", "format:examples:loopback"]
+
+[tasks."format:examples:loopback"]
+description = "Format/tidy the dependency-free offline WAV measurement example"
+dir = "_examples/loopback"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
+
+[tasks."lint:examples:loopback"]
+description = "Check the offline tool without native libraries or device access"
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...', 'golangci-lint run --config "{{config_root}}/.golangci.yaml"']
+
+[tasks."test:loopback"]
+description = "Offline WAV/analysis tests against known synthetic offsets/relative clock ratios"
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = "go test -count=1 ./..."
+
+[tasks."test:loopback:artifacts"]
+description = "Retain a synthetic WAV/reference/report/truth fixture under var; no hardware or recording"
+depends = ["prepare"]
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+env.SENDSPIN_LOOPBACK_ARTIFACT_DIR = "{{config_root}}/var/loopback"
+run = "go test -count=1 -v -run '^TestOfflineCLIEndToEndAndNoOverwrite$' ."
+
+[tasks."build:loopback"]
+description = "Build the standalone offline tool without CGO, native audio or SDK runtime imports"
+depends = ["prepare"]
+dir = "_examples/loopback"
+env.CGO_ENABLED = "0"
+run = 'go build -o "{{config_root}}/var/bin/loopback/" .'
 
 [tasks."format:backends"]
-description = "Format independent audio backend modules"
-depends = ["format:backends:portaudio"]
+description = "Format the independent native selector (backend packages are formatted once with the root)"
+depends = ["format:backends:desktop"]
 
-[tasks."format:backends:portaudio"]
-description = "Format and tidy the independent PortAudio module"
-depends = ["format:backends:portaudio:code", "format:backends:portaudio:deps"]
-
-[tasks."format:backends:portaudio:code"]
-dir = "audio/portaudio"
-run = 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...'
-
-[tasks."format:backends:portaudio:deps"]
-dir = "audio/portaudio"
-run = "go mod tidy"
+[tasks."format:backends:desktop"]
+description = "Format and tidy the independent native selector module"
+dir = "audio/native"
+run = ['go mod tidy', 'golangci-lint fmt --config "{{config_root}}/.golangci.yaml" ./...']
 
 [tasks."format:examples:player"]
 description = "Format and tidy the independent native player module"
@@ -65,7 +90,7 @@ run = "go mod tidy"
 
 [tasks."format:check"]
 description = "Check golangci-lint formatting without changing files"
-depends = ["lint:go:format", "lint:backends:portaudio:format", "lint:examples:player:format", "lint:examples:audio-probe"]
+depends = ["lint:go:format", "lint:backends:desktop", "lint:examples:player:format", "lint:examples:audio-probe", "lint:examples:loopback"]
 
 [tasks."format:examples:audio-probe"]
 description = "Format and tidy the standalone output validation example"
@@ -79,7 +104,7 @@ run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/
 
 [tasks."lint:native:examples:audio-probe"]
 dir = "_examples/audio-probe"
-env.CGO_ENABLED = "1"
+env.CGO_ENABLED = "0"
 run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
 
 [tasks.lint]
@@ -113,22 +138,98 @@ run = "actionlint -shellcheck="
 
 [tasks."lint:examples"]
 description = "Check all independent examples without requiring native headers"
-depends = ["lint:examples:player", "lint:examples:audio-probe"]
+depends = ["lint:examples:player", "lint:examples:audio-probe", "lint:examples:loopback"]
 
 [tasks."lint:backends"]
-description = "Check independent backend formatting and module files"
-depends = ["lint:backends:portaudio"]
+description = "Check the independent native selector; root lint covers concrete backends"
+depends = ["lint:backends:desktop"]
 
-[tasks."lint:backends:portaudio"]
-depends = ["lint:backends:portaudio:format", "lint:backends:portaudio:mod"]
+[tasks."lint:backends:desktop"]
+description = "Check native selector formatting, dependencies and CGO-free loading"
+dir = "audio/native"
+env.CGO_ENABLED = "0"
+run = ['go mod tidy -diff', 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...', 'golangci-lint run --config "{{config_root}}/.golangci.yaml"']
 
-[tasks."lint:backends:portaudio:format"]
-dir = "audio/portaudio"
-run = 'golangci-lint fmt --diff --config "{{config_root}}/.golangci.yaml" ./...'
+[tasks."lint:desktop-audio"]
+description = "Lint CGO-free host backend and shared queue code, including opt-in E2E"
+env.CGO_ENABLED = "0"
+run = 'golangci-lint run --build-tags=e2e ./audio/...'
 
-[tasks."lint:backends:portaudio:mod"]
-dir = "audio/portaudio"
-run = "go mod tidy -diff"
+[tasks."test:desktop-audio"]
+description = "Record CGO-free native load/clock/callback ABI evidence without audio devices or servers"
+run = "go run ./internal/specauditcmd run --suite desktop-audio"
+
+[tasks."test:desktop-audio:stub"]
+description = "Test concrete backends and queues without CGO, a C compiler or device opt-ins"
+env.CGO_ENABLED = "0"
+run = "go test -count=1 ./audio/..."
+
+[tasks."test:desktop-audio:race"]
+description = "Optional race instrumentation; CGO is for the Go race runtime, not backend implementation"
+env.CGO_ENABLED = "1"
+run = "go test -race -count=1 ./audio/..."
+
+[tasks."test:desktop-audio:e2e"]
+description = "Platform-tagged output, marker loopback and Source/input; native tests SKIP without device ENV"
+run = "go run ./internal/specauditcmd run --suite desktop-audio-e2e"
+
+[tasks."test:desktop-audio:source:fake"]
+description = "SOFTWARE ONLY: Source helper through pinned independent decoder with fake input; never hardware evidence"
+env.CGO_ENABLED = "0"
+env.UV_PROJECT_ENVIRONMENT = "{{config_root}}/var/python/e2e"
+env.SENDSPIN_AUDIOTEST_SOURCE_E2E_FAKE = "1"
+run = ["uv sync --locked --project internal/e2e", "go test -tags=e2e -count=1 -v -timeout=90s -run '^TestReferenceServerFakeInputScenario$' ./audio/internal/audiotest"]
+
+[tasks."test:pipewire:isolated"]
+description = "Native PipeWire lifecycle through a private timer-driven null sink, never the host audio server"
+env.CGO_ENABLED = "0"
+env.SENDSPIN_PIPEWIRE_ISOLATED = "1"
+env.SENDSPIN_PIPEWIRE_ARTIFACT_DIR = "{{config_root}}/var/platform-validation/native-desktop/pipewire"
+run = "go test -count=1 -v -run '^TestIsolatedPipeWirePlaybackLifecycle$' ./audio/pipewire"
+
+[tasks."test:pipewire:e2e:isolated"]
+description = "Independent encrypted server through a real private PipeWire null graph; software integration, no hardware"
+env.CGO_ENABLED = "0"
+env.UV_PROJECT_ENVIRONMENT = "{{config_root}}/var/python/e2e"
+env.SENDSPIN_PIPEWIRE_ISOLATED_E2E = "1"
+env.SENDSPIN_PIPEWIRE_E2E_ROOT = "{{config_root}}"
+run = ["uv sync --locked --project internal/e2e", "go test -tags=e2e -count=1 -v -timeout=2m -run '^TestReferenceServerPrivatePipeWireScenario$' ./audio/pipewire"]
+
+[tasks."lint:backends:alsa"]
+description = "Check root ALSA package without CGO or native headers"
+env.CGO_ENABLED = "0"
+run = 'golangci-lint run ./audio/alsa'
+
+[tasks."lint:alsa"]
+description = "Lint purego ALSA including opt-in scenarios (no development headers required)"
+env.CGO_ENABLED = "0"
+run = 'golangci-lint run --build-tags=e2e ./audio/alsa'
+
+[tasks."test:alsa"]
+description = "Record Linux ALSA native null-PCM and fake-device evidence, without opening hardware"
+run = "go run ./internal/specauditcmd run --suite alsa"
+
+[tasks."test:alsa:loopback"]
+description = "LIVE PLAY! 3 SDK loopback: cable already connected, five-second capture, no prompts, leaves output muted"
+run = 'bash "{{config_root}}/mise-tasks/play3-low-level-loopback.sh" --acknowledge-unverified-wiring --capture-gain-24db --sdk-output --connected-leave-muted'
+
+[tasks."test:alsa:e2e"]
+description = "LIVE PLAY! 3: three-minute independent-server PCM/FLAC, pause/reconnect/stop; no capture, no prompts, leaves muted"
+run = 'bash "{{config_root}}/mise-tasks/play3-low-level-loopback.sh" --acknowledge-unverified-wiring --capture-gain-24db --sdk-output --connected-leave-muted --e2e'
+
+[tasks."test:alsa:e2e:virtual"]
+description = "SOFTWARE ONLY: independent-server scenario with virtual output; no audio devices, mixers or capture"
+run = 'bash "{{config_root}}/mise-tasks/alsa-e2e-virtual.sh"'
+
+[tasks."test:alsa:stub"]
+description = "Test ALSA null PCM, fake devices and unavailable-platform behavior without CGO"
+env.CGO_ENABLED = "0"
+env.SENDSPIN_ALSA_SILENCE_DEVICE = ""
+run = "go test -count=1 ./audio/alsa"
+
+[tasks."test:alsa:e2e:optin"]
+description = "ALSA tagged output, marker loopback and Source/input; skip without explicit device consent"
+run = "go run ./internal/specauditcmd run --suite alsa-e2e"
 
 [tasks."lint:examples:player"]
 description = "Check native player formatting and module files"
@@ -145,26 +246,17 @@ dir = "_examples/player"
 run = "go mod tidy -diff"
 
 [tasks."lint:native"]
-description = "Lint the native backend and player (PortAudio development files required)"
-depends = ["lint:native:backends", "lint:native:examples"]
-
-[tasks."lint:native:backends"]
-depends = ["lint:native:backends:portaudio"]
-
-[tasks."lint:native:backends:portaudio"]
-description = "Lint the PortAudio module with CGO"
-dir = "audio/portaudio"
-env.CGO_ENABLED = "1"
-run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
+description = "Lint purego native backends, selector and examples"
+depends = ["lint:desktop-audio", "lint:backends:desktop", "lint:native:examples"]
 
 [tasks."lint:native:examples"]
 description = "Lint all examples with native backends"
 depends = ["lint:native:examples:player", "lint:native:examples:audio-probe"]
 
 [tasks."lint:native:examples:player"]
-description = "Lint the independent PortAudio player"
+description = "Lint the independent purego native player"
 dir = "_examples/player"
-env.CGO_ENABLED = "1"
+env.CGO_ENABLED = "0"
 run = 'golangci-lint run --config "{{config_root}}/.golangci.yaml"'
 
 [tasks."test:module"]
@@ -180,20 +272,8 @@ depends = ["prepare"]
 run = "go run ./internal/specauditcmd run --suite unit --coverage"
 
 [tasks."test:native"]
-description = "Test native backend and example without opening hardware"
-depends = ["test:native:backends", "test:native:examples"]
-
-[tasks."test:native:backends"]
-depends = ["test:native:backends:portaudio"]
-
-[tasks."test:native:backends:portaudio"]
-run = "go run ./internal/specauditcmd run --suite portaudio"
-
-[tasks."test:native:examples"]
-depends = ["test:native:examples:player"]
-
-[tasks."test:native:examples:player"]
-run = "go run ./internal/specauditcmd run --suite native-example"
+description = "Test current native backends and examples without opening hardware"
+depends = ["test:desktop-audio", "test:alsa", "test:examples"]
 
 [tasks."test:examples"]
 description = "Test example selection without CGO or audio hardware"
@@ -203,41 +283,11 @@ depends = ["test:examples:player"]
 run = "go run ./internal/specauditcmd run --suite examples"
 
 [tasks."build:example"]
-description = "Build both Oto-only and native player variants"
-depends = ["build:example:oto", "build:example:portaudio"]
-
-[tasks."build:example:oto"]
+description = "Build the native player without CGO or a C compiler"
 depends = ["prepare"]
-description = "Build the Oto-only player without CGO"
 dir = "_examples/player"
 env.CGO_ENABLED = "0"
-run = 'go build -o "{{config_root}}/var/bin/oto/" .'
-
-[tasks."build:example:portaudio"]
-depends = ["prepare"]
-description = "Build the native player with CGO and PortAudio"
-dir = "_examples/player"
-env.CGO_ENABLED = "1"
-run = 'go build -o "{{config_root}}/var/bin/portaudio/" .'
-
-[tasks."validate:audio:oto"]
-description = "Explicit native silence-only Oto lifecycle smoke (not physical sync evidence)"
-depends = ["prepare"]
-dir = "_examples/audio-probe"
-env.CGO_ENABLED = "0"
-run = 'go run . -backend oto -run-silence -output "{{config_root}}/var/platform-validation/oto.json"'
-
-[tasks."validate:audio:portaudio"]
-description = "Explicit native silence-only PortAudio lifecycle smoke (requires an output device)"
-depends = ["prepare"]
-dir = "_examples/audio-probe"
-env.CGO_ENABLED = "1"
-run = 'go run . -backend portaudio -run-silence -output "{{config_root}}/var/platform-validation/portaudio.json"'
-
-[tasks."validate:audio:portaudio:wslg"]
-description = "Silence-only PortAudio via private WSLg Pulse/ALSA routing; no global audio changes"
-depends = ["prepare"]
-run = 'bash "{{config_root}}/mise-tasks/validate-audio-wslg.sh"'
+run = 'go build -o "{{config_root}}/var/bin/native/" .'
 
 [tasks."test:timefilter"]
 description = "Run the C++-generated time-filter vectors without a C++ compiler"
@@ -293,6 +343,10 @@ run = "go run ./internal/specauditcmd verify-spec"
 description = "Verify fixed independent Cacophony Noise vectors against their pinned source"
 run = "go run ./internal/noisevectorcmd"
 
+[tasks."audit:verify-cpace"]
+description = "Recompute frozen TEST transcripts with the pinned independent Python CPace source, then compare Go; no network protocol or hardware"
+run = ['uv run --locked --project internal/e2e python internal/e2e/cpace_oracle.py', "go test -race -count=1 -run '^TestPinnedPythonDifferentialCorpus$' ./internal/cpace"]
+
 [tasks."audit:verify-mdns"]
 description = "Verify pinned mDNS source files and exact scoped import transformations"
 run = "go run ./internal/mdnsimportcmd"
@@ -303,7 +357,7 @@ run = "go run ./internal/specauditcmd report --profile full --require-conformanc
 
 [tasks."audit:check-evidence"]
 description = "Require fresh complete core evidence, without claiming complete conformance"
-depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise", "audit:verify-mdns"]
+depends = ["lint", "test", "test:examples", "test:e2e", "test:mdns", "test:conformance", "test:fuzz", "test:module", "test:timefilter:reference", "audit:verify-spec", "audit:verify-noise", "audit:verify-cpace", "audit:verify-mdns"]
 run = "go run ./internal/specauditcmd report --profile full"
 
 [tasks.vuln]

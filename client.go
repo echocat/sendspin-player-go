@@ -38,15 +38,17 @@ type request struct {
 // Client represents one persistent device. Construct a separate Client and Store
 // for each independent player. It is safe to call methods concurrently.
 type Client struct {
-	cfg         Config
-	mu          sync.Mutex
-	admission   sync.Mutex
-	credentials Credentials
-	active      *session
-	sessions    map[*session]bool
-	mode        string
-	modeUsers   int
-	events      chan Event
+	cfg           Config
+	mu            sync.Mutex
+	admission     sync.Mutex
+	credentials   Credentials
+	active        *session
+	sessions      map[*session]bool
+	mode          string
+	modeUsers     int
+	events        chan Event
+	pairWindow    pairingWindow
+	playerControl *playerControl
 }
 
 // New validates and copies configuration and loads (or creates and saves) the
@@ -58,6 +60,9 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	credentials, err := config.Store.Load(ctx)
 	if errors.Is(err, ErrNoCredentials) {
 		credentials, err = NewCredentials()
+		if err == nil {
+			err = ensureStaticPIN(&credentials, config.CodePairing)
+		}
 		if err == nil {
 			err = config.Store.Save(ctx, credentials)
 		}
@@ -72,7 +77,18 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		return nil, errors.New("sendspin: record capacity smaller than persisted records")
 	}
 	credentials = cloneCredentials(credentials)
+	if config.CodePairing != nil && config.CodePairing.Static && credentials.StaticPairingPIN == nil {
+		if err = ensureStaticPIN(&credentials, config.CodePairing); err != nil {
+			return nil, err
+		}
+		if err = config.Store.Save(ctx, cloneCredentials(credentials)); err != nil {
+			return nil, err
+		}
+	}
 	c := &Client{cfg: config, credentials: credentials, sessions: map[*session]bool{}, events: make(chan Event, 64)}
+	if config.PlayerControl != nil {
+		c.playerControl = newPlayerControl(c, *config.PlayerControl)
+	}
 	c.logger().Debug("Sendspin client initialized")
 	return c, nil
 }
@@ -254,7 +270,12 @@ func (c *Client) handle(ctx context.Context, conn *websocket.Conn) (result error
 	key := c.credentials.PrivateKey
 	c.mu.Unlock()
 	defer func() {
+		c.endPlayerControlSession(s)
+		s.endPairing(true)
 		c.mu.Lock()
+		if c.pairWindow.owner == s {
+			c.pairWindow = pairingWindow{}
+		}
 		delete(c.sessions, s)
 		if c.active == s {
 			c.active = nil
@@ -407,7 +428,9 @@ func (c *Client) SetAvailable(ctx context.Context, available bool) error {
 	return c.request(ctx, "available", available)
 }
 
-// SetVolume updates/persists a perceived volume in [0,100] without clearing mute.
+// SetVolume updates/persists legacy software volume without clearing mute.
+// In host-managed mode it accepts an asynchronous write, not an observation;
+// inspect Snapshot().PlayerControl for completion and report readback separately.
 func (c *Client) SetVolume(ctx context.Context, volume int) error {
 	if volume < 0 || volume > 100 {
 		return errors.New("sendspin: volume outside 0-100")
@@ -415,7 +438,7 @@ func (c *Client) SetVolume(ctx context.Context, volume int) error {
 	return c.request(ctx, "volume", volume)
 }
 
-// SetMuted updates/persists mute without changing the stored volume.
+// SetMuted updates/persists legacy mute, or accepts an asynchronous host write.
 func (c *Client) SetMuted(ctx context.Context, muted bool) error {
 	return c.request(ctx, "muted", muted)
 }

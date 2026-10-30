@@ -26,17 +26,20 @@ current stream/format/buffer accounting. No such estimator/setter is added here.
 
 ## Code pairing (R01.08)
 
-Only mandatory `pairing_psk` is advertised. Having an audio output or artwork
+In the default profile only mandatory `pairing_psk` is advertised. Having an audio output or artwork
 consumer is not automatically a usable operator out-channel. Optional static or
 dynamic code pairing requires an explicit product-level choice and separate
 protocol/crypto review; it is not implemented by adding a callback to print digits.
 
-A future interface must own capability advertisement, one offered code method,
+Any code-pairing interface must own capability advertisement, one offered code method,
 display/speaker/QR format selection, local output interruption without moving
 stream timelines, availability, cancellation, deliberate gestures, cooldowns,
 attempt/round/window limits and operator language selection. Rendering a token
 QR is distinct from CPace, commit/reveal, MCF verification and wrapped-secret
-handling. No unreviewed PAKE implementation or pairing UI is introduced.
+handling. The user-requested, opt-in [PIN extension](pin-pairing.md) now implements
+both code protocols (one offered per Client), with an application-owned display.
+It does not introduce speaker/QR output or a production-security certification;
+the frozen baseline classifications are not promoted by its tests.
 
 ## Unpaired withdrawal and physical labels
 

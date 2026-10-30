@@ -35,7 +35,7 @@ func TestModuleArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range r.File {
-		for _, forbidden := range []string{"/.git/", "/.venv/", "/_examples/", "/audio/portaudio/", "/internal/e2e/", "/internal/conformancetest/", "/var/"} {
+		for _, forbidden := range []string{"/.git/", "/.venv/", "/_examples/", "/audio/native/", "/internal/e2e/", "/internal/conformancetest/", "/var/"} {
 			if strings.Contains(entry.Name, forbidden) {
 				t.Fatal("archive includes non-SDK assets:", entry.Name)
 			}

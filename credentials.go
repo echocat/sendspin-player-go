@@ -39,13 +39,15 @@ type PairingRecord struct {
 
 // Credentials are persisted as one transaction. Records are ordered oldest first.
 type Credentials struct {
-	PrivateKey         Secret          `json:"private_key"`
-	PairingPSK         Secret          `json:"pairing_psk"`
-	Records            []PairingRecord `json:"records"`
-	LastPlaybackServer string          `json:"last_playback_server,omitempty"`
-	OutputDelayMS      int             `json:"output_delay_ms"`
-	Volume             int             `json:"volume"`
-	Muted              bool            `json:"muted"`
+	PrivateKey           Secret          `json:"private_key"`
+	PairingPSK           Secret          `json:"pairing_psk"`
+	Records              []PairingRecord `json:"records"`
+	LastPlaybackServer   string          `json:"last_playback_server,omitempty"`
+	OutputDelayMS        int             `json:"output_delay_ms"`
+	Volume               int             `json:"volume"`
+	Muted                bool            `json:"muted"`
+	StaticPairingPIN     *Secret         `json:"static_pairing_pin,omitempty"`
+	DynamicPairingRounds uint32          `json:"dynamic_pairing_rounds,omitempty"`
 }
 
 func (Credentials) String() string   { return "[sendspin credentials REDACTED]" }
@@ -130,6 +132,16 @@ type Store interface {
 }
 
 func validateCredentials(c Credentials) error {
+	if c.DynamicPairingRounds > 20 {
+		return errors.New("sendspin: invalid persisted pairing limit")
+	}
+	if c.StaticPairingPIN != nil {
+		for _, digit := range c.StaticPairingPIN[:8] {
+			if digit < '0' || digit > '9' {
+				return errors.New("sendspin: invalid persisted static pairing code")
+			}
+		}
+	}
 	if c.PrivateKey == (Secret{}) || c.PairingPSK == (Secret{}) {
 		return errors.New("sendspin: empty credentials")
 	}

@@ -34,6 +34,7 @@ type Engine struct {
 	cancel                            context.CancelFunc
 	volume                            int
 	muted                             bool
+	unityGain                         bool // Immutable after construction; host owns volume/mute.
 	delay                             int
 	stateChanged                      chan struct{}
 	corrections                       correctionWindow // Render-worker owned, across resets/formats.
@@ -56,6 +57,14 @@ func (e *Engine) Stats() BufferStats {
 
 func New(output audio.Output, capacity int, localTime func(int64) (time.Time, error)) *Engine {
 	return &Engine{output: output, Capacity: capacity, DecodedLimit: 32 << 20, localTime: localTime, wake: make(chan struct{}, 1), stateChanged: make(chan struct{}), volume: 100}
+}
+
+// NewUnityGain bypasses all software gain, mute and gain ramps, including after
+// timeline recovery. Host controls can never attenuate decoded samples here.
+func NewUnityGain(output audio.Output, capacity int, localTime func(int64) (time.Time, error)) *Engine {
+	e := New(output, capacity, localTime)
+	e.unityGain = true
+	return e
 }
 func (e *Engine) notify() {
 	select {
@@ -223,7 +232,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			cancel()
 			continue
 		}
-		err := e.render(work, device, chunk, &gain)
+		err := e.renderRecovering(work, device, chunk, &gain)
 		interrupted := work.Err() != nil
 		cancel()
 		if err != nil && !(interrupted && errors.Is(err, context.Canceled)) {
@@ -233,6 +242,32 @@ func (e *Engine) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (e *Engine) renderRecovering(ctx context.Context, device audio.Device, c Chunk, gain *float32) error {
+	var err error
+	for range 4 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		previous := *gain
+		err = e.render(ctx, device, c, gain)
+		var reset audio.TimelineResetError
+		if !errors.As(err, &reset) {
+			return err
+		}
+		if reset.AudioTimelineReset() {
+			if flushErr := device.Flush(ctx); flushErr != nil {
+				return flushErr
+			}
+			*gain = 0
+		} else {
+			*gain = previous
+		}
+		// Remap from the original source timestamp. render discards stale frames;
+		// never replay a partial submission or change production retry/backoff.
+	}
+	return err
 }
 
 func (e *Engine) render(ctx context.Context, device audio.Device, c Chunk, gain *float32) error {
@@ -315,6 +350,13 @@ func (e *Engine) render(ctx context.Context, device audio.Device, c Chunk, gain 
 			}
 			samples = append(prefix, samples...)
 		}
+	}
+	if e.unityGain {
+		*gain = 1
+		if len(samples) > 0 {
+			return device.Write(ctx, samples)
+		}
+		return nil
 	}
 	desired := float32(math.Pow(float64(volume)/100, 1.5))
 	if muted {

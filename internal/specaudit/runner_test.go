@@ -17,6 +17,8 @@ func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) 
 			put(t, p.Root, "_examples/player/go.mod", "module example.test/player\n\ngo 1.27.3\n")
 			put(t, p.Root, "_examples/audio-probe/go.mod", "module example.test/probe\n\ngo 1.27.3\n")
 			put(t, p.Root, "_examples/audio-probe/probe_test.go", "package probe\nimport \"testing\"\nfunc TestProbe(t *testing.T){}\n")
+			put(t, p.Root, "_examples/loopback/go.mod", "module example.test/loopback\n\ngo 1.27.3\n")
+			put(t, p.Root, "_examples/loopback/loopback_test.go", "package loopback\nimport \"testing\"\nfunc TestOffline(t *testing.T){}\n")
 			fault := `t.Fatal("controlled runtime failure")`
 			if mode == "source-mutated" {
 				fault = `if err:=os.WriteFile("../../impl.go",[]byte("package audit\n// mutated by evidence fault fixture\n"),0600);err!=nil{t.Fatal(err)}`
@@ -63,7 +65,7 @@ func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) 
 			}
 			wantCommands := 1
 			if mode == "source-mutated" {
-				wantCommands = 2
+				wantCommands = 3
 			}
 			if len(manifest.Commands) != wantCommands {
 				t.Fatal("missing actual command record")

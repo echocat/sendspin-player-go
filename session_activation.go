@@ -27,6 +27,9 @@ func (s *session) activationRefusal(activities map[string]bool, roles []Role, pa
 // without admitting its unsupported attempt or adopting its explicit role set.
 func (s *session) rejectPairingActivation(playbackCapable bool) error {
 	if !playbackCapable {
+		if err := s.stopSource(); err != nil {
+			return err
+		}
 		// Re-handshaking off a long-term key can make persisted roles implicitly
 		// inactive. A method refusal must never preserve those old permissions.
 		for family := range s.active {
@@ -38,6 +41,7 @@ func (s *session) rejectPairingActivation(playbackCapable bool) error {
 			s.clearRole(family)
 		}
 		s.active = map[string]Role{}
+		s.client.endPlayerControlSession(s)
 		s.state.ActiveRoles = []Role{}
 		s.state.Available = false
 		s.publish()
@@ -45,5 +49,8 @@ func (s *session) rejectPairingActivation(playbackCapable bool) error {
 	s.endPairing(true)
 	// Receipt, not acceptance, ends the first/re-handshake activation gate.
 	s.activated, s.awaitingActivation = true, false
+	if playbackCapable && s.has(Player) {
+		s.client.setPlayerControlSession(s)
+	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,159 @@ func TestRealRunRejectsUnknownSuiteWithoutExecutingIt(t *testing.T) {
 	p := fixture(t)
 	if _, err := p.invocations("not-a-suite", false); err == nil {
 		t.Fatal("accepted arbitrary execution profile")
+	}
+}
+
+func TestALSASuitePinsHardwareOptOutAndDoesNotInheritEvidence(t *testing.T) {
+	p := fixture(t)
+	calls, err := p.invocations("alsa", false)
+	if err != nil || len(calls) != 1 || calls[0].dir != "audio/alsa" || !slices.Contains(calls[0].env, "CGO_ENABLED=0") || !slices.Contains(calls[0].env, "SENDSPIN_ALSA_SILENCE_DEVICE=") {
+		t.Fatal("ALSA suite must not inherit a hardware-test opt-in", calls, err)
+	}
+	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_REQUIRE_LIBRARY=1") {
+		t.Fatal("dedicated ALSA evidence must require the real system library for its private null PCM")
+	}
+	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_DUPLEX_CAPTURE=") {
+		t.Fatal("ordinary ALSA evidence must explicitly disable capture consent")
+	}
+	if !slices.Contains(calls[0].env, "SENDSPIN_ALSA_REFERENCE_PLAYBACK=") {
+		t.Fatal("ordinary ALSA evidence must explicitly disable nonzero reference playback")
+	}
+	for _, flag := range []string{"SENDSPIN_ALSA_E2E_PLAYBACK=", "SENDSPIN_ALSA_E2E_VIRTUAL="} {
+		if !slices.Contains(calls[0].env, flag) {
+			t.Fatal("ordinary ALSA evidence must disable independent-server opt-ins")
+		}
+	}
+	report, err := p.Report(ReportOptions{Profile: "alsa"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(report.Problems, "required suite alsa: not-run") || report.ConformanceClaim {
+		t.Fatal("ALSA native/physical evidence was invented", report.Problems)
+	}
+}
+
+func TestNativeProfileRequiresCurrentBackendsNotRetiredPortAudio(t *testing.T) {
+	p := fixture(t)
+	report, err := p.Report(ReportOptions{Profile: "native"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suite := range []string{"desktop-audio", "examples"} {
+		if !slices.Contains(report.Problems, "required suite "+suite+": not-run") {
+			t.Fatal(report.Problems)
+		}
+	}
+	for _, suite := range []string{"portaudio", "native-example"} {
+		if _, err := p.invocations(suite, false); err == nil {
+			t.Fatal("retired suite still executable", suite)
+		}
+		for _, problem := range report.Problems {
+			if strings.Contains(problem, suite) {
+				t.Fatal(problem)
+			}
+		}
+	}
+}
+
+func TestBackendInventoryUsesRootPackagesAndSeparateOptInSuites(t *testing.T) {
+	p := fixture(t)
+	for _, file := range []string{"audio/pipewire/abi_test.go", "audio/internal/bridge/callback_test.go"} {
+		put(t, p.Root, file, "package backend\nimport \"testing\"\nfunc TestABI(t *testing.T) {}\n")
+	}
+	put(t, p.Root, "audio/coreaudio/loopback_e2e_test.go", "//go:build e2e && darwin\n\npackage coreaudio\nimport \"testing\"\nfunc TestNativeLoopback(t *testing.T) {}\n")
+	inv, err := Discover(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"desktop-audio:example.test/audit/audio/pipewire#TestABI", "desktop-audio:example.test/audit/audio/internal/bridge#TestABI", "desktop-audio-e2e:example.test/audit/audio/coreaudio#TestNativeLoopback"} {
+		if _, ok := inv.Tests[id]; !ok {
+			t.Fatal("missing migrated test", id)
+		}
+	}
+	calls, err := p.invocations("desktop-audio", false)
+	if err != nil || len(calls) != 2 || calls[0].dir != "." || calls[1].dir != "audio/native" {
+		t.Fatal(calls, err)
+	}
+	for _, call := range calls {
+		if !slices.Contains(call.env, "CGO_ENABLED=0") {
+			t.Fatal("backend suite requires CGO", call)
+		}
+	}
+	for _, suite := range []string{"alsa-e2e", "desktop-audio-e2e"} {
+		calls, err := p.invocations(suite, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if !slices.Contains(call.env, "SENDSPIN_AUDIOTEST_SOURCE_E2E_FAKE=") {
+				t.Fatal("native E2E inherited software-only source opt-in", call)
+			}
+			for _, prefix := range []string{"ALSA", "PIPEWIRE", "COREAUDIO", "WASAPI", "AUDIOTEST"} {
+				if !slices.Contains(call.env, "SENDSPIN_"+prefix+"_E2E_VIRTUAL=") {
+					t.Fatal("native E2E can inherit a virtual fake", call)
+				}
+			}
+		}
+	}
+}
+
+func backendE2EReportFixture(t *testing.T, events string) Report {
+	t.Helper()
+	p := fixture(t)
+	manifest, directory := evidenceFixture(t, p, events)
+	manifest.Suite = "alsa-e2e"
+	manifest.Scope = suiteScope(manifest.Suite)
+	calls, err := p.invocations(manifest.Suite, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Commands[0].Args = calls[0].args
+	manifest.Commands[0].Directory = calls[0].dir
+	manifest.Commands[0].Environment = executionEnv(calls[0])
+	if err := os.Remove(filepath.Join(filepath.Dir(directory), "current.json")); err != nil {
+		t.Fatal(err)
+	}
+	slot := filepath.Join(p.Root, "var/audit/evidence/alsa-e2e/context")
+	put(t, slot, "run-fixture/events.jsonl", events)
+	if err := writeJSON(filepath.Join(slot, "run-fixture/manifest.json"), manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(slot, "current.json"), struct {
+		Manifest string `json:"manifest"`
+	}{"run-fixture/manifest.json"}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Report(ReportOptions{Profile: "alsa-e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report
+}
+
+func TestBackendE2ESkipIsNotReportedAsHardwarePass(t *testing.T) {
+	for _, name := range backendHardwareTests {
+		t.Run(name, func(t *testing.T) {
+			events := strings.ReplaceAll(validGoEvents, `"Action":"pass","Package":"example.test/audit","Test":"TestOne"`, `"Action":"skip","Package":"example.test/audit","Test":"TestOne"`)
+			events = strings.ReplaceAll(events, "TestOne", name)
+			report := backendE2EReportFixture(t, events)
+			if !slices.Contains(report.Problems, "required suite alsa-e2e: skip") || report.ConformanceClaim {
+				t.Fatal("hardware skip promoted", report.Problems)
+			}
+		})
+	}
+}
+
+func TestBackendE2ERequiresNativeInputNotOnlyOutput(t *testing.T) {
+	// Successful output and marker tests must not hide an absent Source/Input run.
+	events := `{"Action":"start","Package":"example.test/audit"}` + "\n"
+	for _, name := range []string{"TestNativeLoopback", "TestReferenceServerPlaybackScenario"} {
+		events += `{"Action":"run","Package":"example.test/audit","Test":"` + name + `"}` + "\n"
+		events += `{"Action":"pass","Package":"example.test/audit","Test":"` + name + `"}` + "\n"
+	}
+	events += `{"Action":"pass","Package":"example.test/audit"}` + "\n"
+	report := backendE2EReportFixture(t, events)
+	if !slices.Contains(report.Problems, "required suite alsa-e2e: not-run") || report.ConformanceClaim {
+		t.Fatal("missing Source/Input E2E promoted", report.Problems)
 	}
 }

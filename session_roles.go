@@ -21,6 +21,12 @@ func (s *session) request(r request) error {
 		return errors.New("sendspin: re-handshake in progress")
 	}
 	switch r.kind {
+	case "pairing/cancel":
+		if s.pendingPSK == nil && s.codePairing == nil {
+			return nil
+		}
+		s.endPairing(true)
+		return s.send("pair/abort", map[string]string{"reason": "user_cancelled"})
 	case "command":
 		command := r.value.(Command)
 		state := s.state.Controller
@@ -53,6 +59,9 @@ func (s *session) request(r request) error {
 		if !s.has(Player) {
 			return ErrInactiveRole
 		}
+		if s.client.playerControl != nil && r.kind != "delay" {
+			return s.client.playerControl.enqueue(s, r)
+		}
 		if err := s.client.update(r.ctx, func(c *Credentials) error {
 			switch r.kind {
 			case "volume":
@@ -70,6 +79,7 @@ func (s *session) request(r request) error {
 		c := s.client.credentials
 		s.client.mu.Unlock()
 		s.state.Volume, s.state.Muted, s.state.OutputDelayMS = c.Volume, c.Muted, c.OutputDelayMS
+		s.syncPlayerControl()
 		return s.sendState()
 	default:
 		return errors.New("sendspin: unknown local operation")
@@ -159,27 +169,41 @@ func (s *session) serverCommand(data []byte) error {
 	if err := protocol.Decode(data, &p); err != nil {
 		return err
 	}
-	// source is a known core object even though this client never offers that
-	// role. Validate its outer shape before any player-side mutation, but do
-	// not interpret unsupported role-specific fields (M:135, 381-384).
-	if raw, ok := p["source"]; ok && !protocol.Object(raw) {
-		return protocol.ErrProtocol
+	// Validate both objects before side effects, particularly opening an input.
+	// Non-source clients keep unsupported source-specific internals opaque.
+	var sourceCommand string
+	if raw, ok := p["source"]; ok {
+		var err error
+		if sourceCommand, err = s.decodeSourceCommand(raw); err != nil {
+			return err
+		}
 	}
 	raw, ok := p["player"]
 	if !ok {
-		return nil
+		return s.applySourceCommand(sourceCommand)
 	}
 	if !s.has(Player) {
 		return protocol.ErrProtocol
 	}
-	kind, value, err := decodePlayerCommand(raw)
+	s.syncPlayerControl()
+	kind, value, err := decodeOfferedPlayerCommand(raw, playerCommands(s.state))
 	if err != nil {
+		return err
+	}
+	if err := s.applySourceCommand(sourceCommand); err != nil {
 		return err
 	}
 	if kind == "" {
 		return nil
 	}
-	return s.request(request{ctx: s.ctx, kind: kind, value: value})
+	err = s.request(request{ctx: s.ctx, kind: kind, value: value})
+	if s.client.playerControl != nil && kind != "delay" && err != nil {
+		// Backend loss/overload is local, not a malformed server message and
+		// must not tear down a healthy stream or its timing exchange.
+		s.client.emit(Event{Kind: "player_control_error", ServerID: s.channel.ServerID, Err: err})
+		return nil
+	}
+	return err
 }
 
 func (s *session) startStream(data []byte) error {
@@ -311,7 +335,7 @@ func (s *session) stopStream(kind string, data []byte) error {
 	}
 	seen := map[string]bool{}
 	for _, family := range roles {
-		if seen[family] || !s.streams[family] || (kind == "stream/clear" && family == "artwork") {
+		if family == "source" || seen[family] || !s.streams[family] || (kind == "stream/clear" && family == "artwork") {
 			return protocol.ErrProtocol
 		}
 		// Validate every target before stopping any other role. An uncancelled

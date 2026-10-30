@@ -25,7 +25,7 @@ func run(ctx context.Context, args []string) error {
 	coverage := flags.Bool("coverage", false, "Record unit coverage in var/coverage/unit.cov")
 	evidence := flags.String("evidence", "", "Evidence directory (default: var/audit/evidence)")
 	output := flags.String("output", "var/audit", "Generated report directory")
-	profile := flags.String("profile", "catalog", "catalog, full or native evidence gate")
+	profile := flags.String("profile", "catalog", "catalog, full, native, alsa or desktop-audio evidence gate")
 	goos := flags.String("goos", "", "Execution OS filter")
 	arch := flags.String("goarch", "", "Execution architecture filter")
 	variant := flags.String("variant", "default", "Execution variant (stable CI Go is separate from the pinned run)")

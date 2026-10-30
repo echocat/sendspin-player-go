@@ -45,6 +45,10 @@ type Channel struct {
 	observer      diagnostic.Observer
 }
 
+// BindingHash is a detached current Noise transcript binding for code pairing.
+// It changes only after a successfully completed initial/in-band handshake.
+func (c *Channel) BindingHash() []byte { return append([]byte(nil), c.hash...) }
+
 func Handshake(ctx context.Context, conn *websocket.Conn, key noise.DHKey, suite string, limit int, resolve func(string) Resolve, observer diagnostic.Observer) (*Channel, error) {
 	c := &Channel{Conn: conn, key: key, suite: suite, fragments: protocol.Reassembler{Limit: limit}, observer: observer}
 	// The cleartext carrier contains base64-encoded Noise bytes plus JSON.

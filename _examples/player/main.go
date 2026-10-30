@@ -31,12 +31,13 @@ func run() error {
 	endpoint := flag.String("server", "", "Server ws:// endpoint (empty: discover servers)")
 	credentials := flag.String("credentials", filepath.Join(configDir, "sendspin-player-go", "device.json"), "Private credential file")
 	showToken := flag.Bool("pairing-token", false, "Print the confidential pairing token and exit")
-	backend := flag.String("output", "oto", "Audio output: oto or portaudio")
-	approximate := flag.Bool("allow-approximate", false, "Allow Oto's estimated timing and software-only flush (not physical RC1 conformance)")
+	backend := flag.String("output", "native", "Audio output: native (automatic), pipewire, alsa, wasapi, coreaudio, or explicit noop")
+	device := flag.String("device", "", "Explicit backend-specific output device; empty uses backend default")
+	sharedLib := flag.String("shared-lib", "", "Explicit native library path; load errors never fall back")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	output, err := newOutput(*backend, *approximate)
+	output, err := newOutput(*backend, *device, *sharedLib)
 	if err != nil {
 		return err
 	}

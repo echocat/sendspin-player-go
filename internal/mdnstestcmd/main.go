@@ -87,7 +87,7 @@ func fixtureFile(path string) bool {
 	if strings.HasPrefix(path, "internal/e2e/") {
 		name := strings.TrimPrefix(path, "internal/e2e/")
 		switch name {
-		case "server.py", "media.py", "mdns.py", "mdns_monitor.py", "pairing_observer.py", "pyproject.toml", "uv.lock", ".python-version", "go.mod":
+		case "server.py", "media.py", "mdns.py", "mdns_monitor.py", "pairing_observer.py", "weak_playback.py", "source_controls.py", "pyproject.toml", "uv.lock", ".python-version", "go.mod":
 			return true
 		}
 	}
@@ -106,8 +106,8 @@ func buildContext(root, destination string) (string, error) {
 			return err
 		}
 		if entry.IsDir() {
-			if filepath.ToSlash(relative) == "audio/portaudio" {
-				return filepath.SkipDir // Independent native module is not used by this fixture.
+			if filepath.ToSlash(relative) == "audio/native" {
+				return filepath.SkipDir // Independent selector module is not used by this fixture.
 			}
 			if relative != "." && (strings.HasPrefix(entry.Name(), ".") || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "var" || entry.Name() == "testdata") {
 				return filepath.SkipDir

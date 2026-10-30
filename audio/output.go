@@ -34,3 +34,12 @@ type Device interface {
 	Flush(context.Context) error
 	Close() error
 }
+
+// TimelineResetError lets a native backend reject an overtaken Next reservation
+// without silently moving media. AudioTimelineReset reports whether this Write
+// accepted any samples: true requires Flush before remapping, false allows a new
+// Next on the still-running pipeline. The renderer bounds recovery attempts.
+type TimelineResetError interface {
+	error
+	AudioTimelineReset() bool
+}

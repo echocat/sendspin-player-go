@@ -2,7 +2,6 @@
 
 import asyncio
 import socket
-
 from aiohttp import web
 
 from mdns import MDNSPeer
