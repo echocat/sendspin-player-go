@@ -8,25 +8,10 @@ import (
 	"runtime"
 )
 
-// Prepare keeps generated data in a nested module so SDK archives omit it.
+// Prepare creates the project output directory. Package discovery excludes var
+// through the root go.mod ignore directive; preparation creates no submodule.
 func Prepare(root string) error {
-	if err := os.MkdirAll(filepath.Join(root, "var"), 0700); err != nil {
-		return err
-	}
-	path := filepath.Join(root, "var", "go.mod")
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if os.IsExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, err = f.WriteString("module github.com/echocat/sendspin-player-go/var\n")
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
+	return os.MkdirAll(filepath.Join(root, "var"), 0700)
 }
 
 func Python(root, suite string) string {

@@ -64,9 +64,12 @@ and [external player-control](external-player-control.md) for the precise contra
   native-backend ABI/software profiles and platform matrix. These are required
   checks, not a claim that the new workflow has already executed.
 - The module archive test extracts and tests the distributable root with CGO
-  disabled. Backends, selector, real examples and internal Go tools belong to
-  that root archive. Runtime artifacts and Python harness environments remain
-  outside it; shared caches/temp directories are untouched.
+  disabled. Backends, selector and internal Go tools belong to that root archive;
+  each real example has its own `go.mod`/`go.sum`. Local archive selection uses
+  Git-versioned files only, explicitly excludes `_examples`, `internal/e2e` and
+  `internal/conformancetest`, and rejects tracked `var` data. Ignored/untracked
+  generated data is not read or archived. No harness/`var` module markers are
+  needed; shared caches/temp directories are untouched.
 - Check separate consumer modules without local SDK replacements before a tag.
   A checkout-local replacement against the root is not proof that a published
   v0.1.1 dependency provides these new APIs. There is only one publishable Go SDK

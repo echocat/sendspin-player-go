@@ -33,8 +33,7 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: Prepare coverage output
         run: |
-          mkdir -p var/coverage
-          printf '%s\n' 'module github.com/echocat/sendspin-player-go/var' > var/go.mod
+            mkdir -p var/coverage
         shell: bash
       - run: go run ./internal/specauditcmd run --suite unit --coverage
       - run: go mod tidy -diff
@@ -54,10 +53,11 @@ jobs:
           CGO_ENABLED: '0'
         run: go test -count=1 ./audio/native
       - name: Build the native player without CGO or a C compiler
+        working-directory: _examples/player
         env:
           CGO_ENABLED: '0'
         run: |
-          go build -o var/bin/native/ ./_examples/player
+          go build -o ../../var/bin/native/ .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

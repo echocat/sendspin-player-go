@@ -6,6 +6,13 @@ backend APIs described here. The native backend migration is still WIP. Use a
 matching development checkout when evaluating these APIs; historical release
 tags are unchanged, and no new version or successful CI run is implied.
 
+The SDK, backends and `audio/native` selector share the root module; import paths
+are unchanged. Each real example has its own `go.mod`/`go.sum`, requiring SDK
+`v0.1.1` with a local `replace` to `../..` for these unreleased APIs, not a separate
+native-module requirement. From the checkout root, use
+`go -C _examples/player run . -h` or
+`go -C _examples/external-control run .`. See [module layout](module-layout.md).
+
 ## Lifecycle and ownership
 
 `Config.Specification` explicitly pins the protocol profile. Empty selects

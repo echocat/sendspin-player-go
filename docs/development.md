@@ -6,9 +6,10 @@ focused public subpackages, private `internal` implementations, independent
 
 **Unreleased migration:** `v0.1.1` remains the recommended stable release, but
 does not include the new Source, PIN, host-managed player-control or purego backend
-APIs. Concrete audio backends are moving into root packages `audio/alsa`,
-`audio/pipewire`, `audio/wasapi`, `audio/coreaudio` and `audio/noop`; only the optional
-`audio/native` selector and real examples share the same root module. Oto/PortAudio are no longer
+APIs. Concrete audio backends use root packages `audio/alsa`,
+`audio/pipewire`, `audio/wasapi`, `audio/coreaudio` and `audio/noop`; the optional
+`audio/native` selector and internal Go tools also belong to the root module.
+Each real example has its own `go.mod`/`go.sum`. Oto/PortAudio are no longer
 current development backends. Native implementations are still WIP. Historical
 release tags and recorded results are not rewritten by this migration.
 
@@ -31,12 +32,12 @@ a container runtime or access to the developer's LAN.
 
 | Command | Purpose |
 | --- | --- |
-| `mise run format` | Tidy the root module, format SDK/backends/selector/examples and regenerate audit tables |
+| `mise run format` | Format and tidy the root and both example modules; regenerate audit tables |
 | `mise run format:check` | Show formatting differences without rewriting files |
 | `mise run lint` | Aggregate of lint:go, lint:actions, lint:examples and lint:audit |
 | `mise run lint:go` | SDK golangci-lint (including govet), formatting, module files and tagged sources |
 | `mise run lint:actions` | GitHub Actions workflow checks |
-| `mise run lint:examples` | Independent examples' formatting and module files |
+| `mise run lint:examples` | Independent examples' lint, formatting and module files |
 | `mise run lint:audit` | Validate machine-readable requirements, actual test links and generated audit |
 | `mise run format:audit` | Regenerate the human clause tables from their source catalog |
 | `mise run audit:report` | Generate var/audit/report.md and report.json from available evidence |
@@ -82,10 +83,12 @@ runner prefers Podman and accepts an explicit engine through
 The full gate also runs the [local official-harness adapter](conformance-testing.md),
 with its own pinned Python lockfile, generated audio fixture and artifact directory.
 
-The root module archive includes backends, selector, real examples and internal
-Go tools. The two Python-harness marker modules still exclude their environments
-and the generated `var` module stays separate. Root `go test ./...` includes the
-selector and offline tool; underscore-prefixed examples are tested explicitly.
+The root module archive includes backends, selector and internal Go tools.
+The local archive test selects Git-versioned files only, explicitly excludes
+`_examples`, `internal/e2e` and `internal/conformancetest`, and rejects tracked
+`var` files. It does not read ignored/untracked generated data. Neither the Python
+harnesses nor `var` need nested module markers. Root `go test ./...` includes the
+selector and offline tool; each example is tested in its own module.
 See [module layout](module-layout.md). E2E execution needs a complete checkout. Unit tests do not
 require Python, a container, multicast or a physical audio device. ALSA native
 software tests can load system libasound with a private discard-only null PCM;
@@ -116,18 +119,20 @@ linters, asasalint, asciicheck, bidichk, misspell, copyloopvar, exptostd and imp
 Formatting invokes `golangci-lint fmt` directly, including build-tagged sources.
 Go does not recursively discover underscore-prefixed directories such as
 `_examples`; the `go.mod` ignore directives also exclude `_examples` and `var`
-from wildcard discovery. Examples therefore use explicit package paths for
-format/lint/test/build. There is no custom formatting wrapper or example module.
+from wildcard discovery. Examples therefore run format/lint/test/build commands
+in their own modules, for example `go -C _examples/player test ./...` and
+`go -C _examples/player run . -h`. There is no custom formatting wrapper.
 
 `lint` aggregates `lint:go`, `lint:actions`, `lint:examples` and `lint:audit`.
 `lint:go` has separate formatting, module and tagged-source checks; govet runs
 inside golangci-lint, not through a redundant `go vet` command.
 `lint:examples` and `format:examples` explicitly include the player and external-
 control examples. `format:check` reuses formatting tasks. Root `format:go` covers
-all native packages and `internal/loopbackcmd`; dependency tidying runs once for
-the root module. The player is also a root Go tool (`go tool player -h`), keeping
-its application-only provider dependency reachable to `go mod tidy` without
-installing that provider in the SDK runtime.
+all native packages and `internal/loopbackcmd`; dependency tidying runs separately
+for the root and each example module. The player is not a root Go tool. Its
+logging provider dependency is application-owned, not required by the SDK root.
+Both examples require SDK `v0.1.1` with a local `replace` to `../..` for unreleased
+APIs; no separate native-module requirement is needed.
 
 ## MISE file tasks
 

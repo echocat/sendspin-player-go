@@ -5,15 +5,46 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
+func TestExampleSuiteRunsBothIndependentModulesWithoutCGO(t *testing.T) {
+	p := fixture(t)
+	calls, err := p.invocations("examples", false)
+	if err != nil || len(calls) != 2 {
+		t.Fatal("example suite must run both modules separately", calls, err)
+	}
+	manifest := Manifest{Suite: "examples", Scope: suiteScope("examples")}
+	for i, directory := range []string{"_examples/player", "_examples/external-control"} {
+		call := calls[i]
+		if call.dir != directory || call.kind != "go" || !slices.Equal(call.args, []string{"test", "-json", "-count=1", "./..."}) || !slices.Equal(call.env, []string{"CGO_ENABLED=0"}) {
+			t.Fatal("unexpected example module invocation", call)
+		}
+		manifest.Commands = append(manifest.Commands, Command{Directory: call.dir, Kind: call.kind, Args: call.args, Environment: executionEnv(call)})
+	}
+	if err = p.validateCommands(manifest); err != nil {
+		t.Fatal("independent module commands rejected", err)
+	}
+	manifest.Commands = manifest.Commands[:1]
+	if err = p.validateCommands(manifest); err == nil {
+		t.Fatal("missing second example module accepted")
+	}
+	manifest.Commands = manifest.Commands[:2]
+	manifest.Commands[0] = Command{Directory: ".", Kind: "go", Args: []string{"test", "-json", "-count=1", "./_examples/player", "./_examples/external-control"}, Environment: executionEnv(calls[0])}
+	if err = p.validateCommands(manifest); err == nil {
+		t.Fatal("obsolete root-module example invocation accepted")
+	}
+}
+
 func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) {
 	for _, mode := range []string{"compiler-failure", "test-failure", "source-mutated"} {
 		t.Run(mode, func(t *testing.T) {
 			p := fixture(t)
+			put(t, p.Root, "_examples/player/go.mod", "module example.test/player\n\ngo 1.27.3\n")
+			put(t, p.Root, "_examples/external-control/go.mod", "module example.test/external-control\n\ngo 1.27.3\n")
 			put(t, p.Root, "_examples/external-control/host_test.go", "package host\nimport \"testing\"\nfunc TestHost(t *testing.T){}\n")
 			fault := `t.Fatal("controlled runtime failure")`
 			if mode == "source-mutated" {
@@ -34,7 +65,7 @@ func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) 
 				t.Fatal("could not establish an actual previous pass", err)
 			}
 			previous, previousDir, err := readManifest(filepath.Join(slot, "current.json"))
-			if err != nil || previous.ExitCode != 0 || !previous.Complete {
+			if err != nil || previous.ExitCode != 0 || !previous.Complete || len(previous.Commands) != 2 {
 				t.Fatal("missing successful baseline", err)
 			}
 			if mode == "compiler-failure" {
@@ -60,6 +91,9 @@ func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) 
 				t.Fatal("failed run reused previous evidence", manifest)
 			}
 			wantCommands := 1
+			if mode == "source-mutated" {
+				wantCommands = 2
+			}
 			if len(manifest.Commands) != wantCommands {
 				t.Fatal("missing actual command record")
 			}
@@ -68,6 +102,9 @@ func TestActualFailedRunAndSourceMutationCannotReuseAPreviousPass(t *testing.T) 
 			}
 			if mode == "source-mutated" && manifest.Commands[0].ExitCode != 0 {
 				t.Fatal("source-mutation fixture did not actually pass its tests first")
+			}
+			if mode == "source-mutated" && manifest.Commands[1].ExitCode != 0 {
+				t.Fatal("source-mutation fixture did not complete the second example module")
 			}
 			if _, err = os.Stat(filepath.Join(slot, "running.lock")); !os.IsNotExist(err) {
 				t.Fatal("ordinary failure leaked execution lock", err)

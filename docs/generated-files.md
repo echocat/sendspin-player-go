@@ -1,6 +1,6 @@
 # Project outputs and system-managed data
 
-The root `.gitignore` contains exactly `/var/`. Use it for generated files that
+The root `.gitignore` excludes `/var/`. Use it for generated files that
 belong with this checkout, not as a replacement for system temporary directories
 or shared development caches.
 
@@ -27,15 +27,20 @@ and use ordinary system temporary directories.
 
 `mise run prepare` is a genuine file task: mise discovers `prepare.sh` on POSIX
 and its `prepare.ps1` sibling on Windows. There is no duplicate TOML command that
-calls these scripts. Only coverage and explicit example-build tasks depend on
-this directory preparation; ordinary formatting, linting and tests do not.
+calls these scripts. Coverage and tasks retaining explicit build/test artifacts
+use this directory preparation; ordinary formatting, linting and tests do not.
 Fixture runners prepare their own project paths when needed.
 
 The root `go.mod` ignores `var` for recursive Go package discovery; underscore
 directories such as `_examples` are not discovered recursively either.
-Formatting invokes golangci-lint directly, with the independent example checked
-from its own module directory. The generated `var/go.mod` boundary separately
-keeps project outputs out of archives created by `golang.org/x/mod/zip`.
+Formatting invokes golangci-lint directly in the root and each independent
+example module; each example owns its `go.mod`/`go.sum`. Preparation creates
+directories, not a nested `var/go.mod`. The local archive test selects only
+Git-versioned source files and explicitly excludes `_examples`, `internal/e2e`
+and `internal/conformancetest`, without Python-harness module markers. It neither
+reads nor archives Git-ignored/untracked generated data, and rejects any tracked
+`var` data. Go's ignore directive controls package discovery, not zip contents;
+archive selection therefore remains a separate explicit check.
 
 ## CI and containers
 
@@ -54,7 +59,5 @@ Checked-in fuzz seeds and frozen reference vectors are intentional source
 fixtures. Production FileStore credentials belong at the application's configured
 path, not in var; their atomic replacement temporaries must be beside them.
 
-Existing reports remain available. The mistakenly project-local tool caches,
-temporary directories and obsolete environment copies from the earlier layout
-migration have been removed. Unknown files, notably `.idea`, are not rewritten
-or published.
+Existing reports and user caches remain untouched. Unknown files, notably
+`.idea`, are not rewritten or published.

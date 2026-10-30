@@ -30,8 +30,18 @@ description = "Tidy SDK Go dependencies"
 run = "go mod tidy"
 
 [tasks."format:examples"]
-description = "Format the real example applications in the root module"
-run = 'golangci-lint fmt ./_examples/player ./_examples/external-control'
+description = "Format and tidy the independent example modules"
+depends = ["format:examples:player", "format:examples:external-control"]
+
+[tasks."format:examples:player"]
+description = "Format and tidy the player example module"
+dir = "_examples/player"
+run = ["golangci-lint fmt ./...", "go mod tidy"]
+
+[tasks."format:examples:external-control"]
+description = "Format and tidy the external-control example module"
+dir = "_examples/external-control"
+run = ["golangci-lint fmt ./...", "go mod tidy"]
 
 [tasks."test:loopback"]
 description = "Offline WAV/analysis tests against known synthetic offsets/relative clock ratios"
@@ -87,13 +97,33 @@ run = "actionlint -shellcheck="
 
 [tasks."lint:examples"]
 description = "Check real example applications without requiring native headers"
-depends = ["lint:examples:format"]
+depends = ["lint:examples:format", "lint:examples:player", "lint:examples:external-control"]
+
+[tasks."lint:examples:player"]
+description = "Lint and check dependencies of the player example module"
+dir = "_examples/player"
 env.CGO_ENABLED = "0"
-run = 'golangci-lint run ./_examples/player ./_examples/external-control'
+run = ["go mod tidy -diff", "golangci-lint run ./..."]
+
+[tasks."lint:examples:external-control"]
+description = "Lint and check dependencies of the external-control example module"
+dir = "_examples/external-control"
+env.CGO_ENABLED = "0"
+run = ["go mod tidy -diff", "golangci-lint run ./..."]
 
 [tasks."lint:examples:format"]
 description = "Check formatting of real example applications"
-run = 'golangci-lint fmt --diff ./_examples/player ./_examples/external-control'
+depends = ["lint:examples:format:player", "lint:examples:format:external-control"]
+
+[tasks."lint:examples:format:player"]
+description = "Check formatting of the player example module"
+dir = "_examples/player"
+run = "golangci-lint fmt --diff ./..."
+
+[tasks."lint:examples:format:external-control"]
+description = "Check formatting of the external-control example module"
+dir = "_examples/external-control"
+run = "golangci-lint fmt --diff ./..."
 
 [tasks."lint:desktop-audio"]
 description = "Lint CGO-free host backend and shared queue code, including opt-in E2E"
@@ -191,9 +221,10 @@ run = "go run ./internal/specauditcmd run --suite examples"
 [tasks."build:example"]
 description = "Build the native player without CGO or a C compiler"
 depends = ["prepare"]
+dir = "_examples/player"
 env.CGO_ENABLED = "0"
-run = 'go build -o "{{config_root}}/var/bin/native/player" ./_examples/player'
-run_windows = 'go build -o "{{config_root}}/var/bin/native/player.exe" ./_examples/player'
+run = 'go build -o "{{config_root}}/var/bin/native/player" .'
+run_windows = 'go build -o "{{config_root}}/var/bin/native/player.exe" .'
 
 [tasks."test:timefilter"]
 description = "Run the C++-generated time-filter vectors without a C++ compiler"

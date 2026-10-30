@@ -17,6 +17,9 @@ go mod edit -replace github.com/echocat/sendspin-player-go=/absolute/path/to/che
 
 All backend and selector import paths belong to that one module. The new APIs
 are unreleased and require the local root replacement until publication.
+The independent example modules already replace the root with `../..`; neither
+needs a separate `audio/native` module requirement. From the checkout root, use
+`go -C _examples/player run . -h` or `mise run build:example`.
 `ampanion` is not modified by this work.
 
 ## Use

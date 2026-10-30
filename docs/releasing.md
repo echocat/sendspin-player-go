@@ -10,7 +10,7 @@ Review the [API/package findings](api-release-review.md), independent
 alongside the remaining conformance evidence; none authorizes a tag by itself.
 
 1. Run `mise run check:full` on a clean checkout and inspect all CI OS jobs.
-2. Build/test the root-module player and fake host-control examples, native
+2. Build/test each independent example module, plus the root-module native
    selector/backends and internal offline test tools. Record native hardware
    results separately from fake/loopback/software-graph evidence.
 3. Review the spec, reference-server, decoder and tool pins; include dependency
@@ -28,8 +28,12 @@ blocked today. A green software-evidence profile is not permission to advertise
 full RC1 or physical synchronization conformance. The human clause table is
 generated from `rc1-requirements.json`; do not hand-edit it to remove open gaps.
 
-The current tree has one publishable Go module. The Python harness marker
-`go.mod` files exist only to exclude harness environments from SDK archives;
-they have no Go dependencies or release/version lifecycle. Historical PortAudio
-submodule tags remain untouched but are not part of the current backend surface.
-No release automation pushes tags or publishes artifacts.
+The SDK, all backends, selector and internal Go tools have one root module/version.
+Each real example has its own `go.mod`/`go.sum`, requiring SDK `v0.1.1` with a local
+`replace` to `../..` for unreleased APIs. Check a consumer without that replacement
+against the intended release; published `v0.1.1` does not provide the new APIs.
+The local archive check explicitly excludes examples and Python harnesses from
+Git-versioned source selection and rejects tracked `var` data; it needs no
+harness/`var` module markers. Historical PortAudio submodule tags remain untouched
+but are not part of the current backend surface. No release automation pushes
+tags or publishes artifacts.

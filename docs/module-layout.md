@@ -1,19 +1,23 @@
 # Go module layout
 
-The SDK, all audio backends, the `audio/native` selector, internal Go tools and
-the applications in `_examples` share the root module
-`github.com/echocat/sendspin-player-go`. Package import paths are unchanged;
-there are no local SDK `replace` directives or independently versioned backends.
-Go 1.27.3 or newer is required.
+The SDK, all audio backends, the `audio/native` selector and internal Go tools
+share the root module `github.com/echocat/sendspin-player-go`, with no nested
+modules under those packages. Package import paths are unchanged; backends and
+selector have no independent module/version. Go 1.27.3 or newer is required.
+
+Each real application, `_examples/player` and `_examples/external-control`, has
+its own `go.mod` and `go.sum`. Both require SDK `v0.1.1` and locally replace it
+with `../..`. The replacement is necessary for the unreleased APIs: the published
+`v0.1.1` does not contain them. Neither example requires a separate native module.
 
 From the repository root:
 
 ```sh
 go test ./...
-go test ./_examples/player ./_examples/external-control
-go build ./_examples/player ./_examples/external-control
-go run ./_examples/player -h
-go run ./_examples/external-control
+go -C _examples/player test ./...
+go -C _examples/external-control test ./...
+go -C _examples/player run . -h
+go -C _examples/external-control run .
 ```
 
 These commands also work with `CGO_ENABLED=0`. The player help command and the
@@ -21,30 +25,27 @@ fake external-control demonstration do not open audio devices or use discovery.
 Running the player normally is an explicit application action and can open audio
 devices and discover servers.
 
-`./...` skips `_examples`. The root `tool` directive registers the player
-application so that `go mod tidy` retains its dependencies despite that directory
-name; it can also be invoked with `go tool player -h`. The root requirement on
-`github.com/echocat/slf4g/native` is for this application's logging provider.
-Only the application imports and installs that provider. A module requirement
-does not itself import a package, run its initialization or install a provider
-in SDK consumers. The SDK uses the `slf4g` facade without choosing an output.
+Root `./...` does not cover the example modules. Run Go commands in each module,
+or use `mise run test:examples` and `mise run build:example`. Formatting, tidying
+and linting also run separately per module. The player is not a root Go tool;
+its `github.com/echocat/slf4g/native` provider dependency belongs to the player
+module alone. The SDK uses the `slf4g` facade without choosing an output.
+The offline WAV/analysis tool remains at `internal/loopbackcmd` in the root module.
 
 ## Distribution and privacy boundaries
 
 Go's `ignore` directives filter wildcard package discovery, not module-zip
-contents. The module archive intentionally includes the public examples, all
-audio backends and native selector. The archive integration test extracts it,
-runs `go test ./...` and explicitly builds both examples.
+contents. The root module archive includes all audio backends, the native
+selector and internal Go tools, not the separate example modules. The archive
+integration test extracts it and runs `go test ./...` with CGO disabled.
 
-Two dependency-free nested `go.mod` files are deliberate privacy markers, not
-separate Go SDK implementations:
+The local archive integration test selects only Git-versioned files, explicitly
+excludes `_examples`, `internal/e2e` and `internal/conformancetest`, and passes the
+remaining files to `golang.org/x/mod/zip.Create`. The Python harness directories
+have no `go.mod` privacy markers. Git-ignored and untracked generated data is
+neither read nor archived.
 
-- `internal/e2e/go.mod` excludes Python environments and reference-server assets.
-- `internal/conformancetest/go.mod` excludes the Python conformance harness.
-
-`golang.org/x/mod/zip.CreateFromDir` omits nested modules and their contents.
-Keep these markers even though the harnesses have no Go dependencies. Generated
-assets live under `var`, whose generated module marker similarly excludes them
-from directory-based archives; do not remove existing environments or caches to
-make an archive pass. `TestModuleArchive` rejects Python environments, either
-harness and generated `var` assets in the SDK zip.
+Generated assets live under Git-ignored `var`; its root `go.mod` ignore entry
+excludes package discovery, so no generated `var/go.mod` is needed. Accidentally
+version-controlled `var` data is rejected rather than packaged. Existing outputs,
+environments and user caches are never deleted to make an archive pass.

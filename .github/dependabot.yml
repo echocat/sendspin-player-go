@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      # CodeQL sub-actions must use the same version.
+      codeql-actions:
+        applies-to: "version-updates"
+        patterns:
+          - "github/codeql-action/*"
+      codeql-actions-security:
+        applies-to: "security-updates"
+        patterns:
+          - "github/codeql-action/*"
+
+  - package-ecosystem: "gomod"
+    directories:
+      - "/"
+      - "/_examples/*"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-type: "all"
+    ignore:
+      # Nested modules resolve the SDK through a local replace to this repository.
+      - dependency-name: "github.com/echocat/sendspin-player-go"
+    groups:
+      go-modules:
+        applies-to: "version-updates"
+        group-by: "dependency-name"
+        patterns:
+          - "*"

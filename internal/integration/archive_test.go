@@ -25,9 +25,19 @@ func TestModuleArchive(t *testing.T) {
 		t.Fatal("cannot locate repository")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+	if _, err := os.Stat(filepath.Join(root, ".git")); os.IsNotExist(err) {
+		t.Skip("local archive validation requires a version-controlled checkout")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("local archive validation requires git")
+	}
 	m := module.Version{Path: "github.com/echocat/sendspin-player-go", Version: "v0.0.0"}
 	var archive bytes.Buffer
-	if err := modzip.CreateFromDir(&archive, m, root); err != nil {
+	sourceFiles, err := trackedArchiveFiles(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modzip.Create(&archive, m, sourceFiles); err != nil {
 		t.Fatal(err)
 	}
 	r, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
@@ -37,19 +47,19 @@ func TestModuleArchive(t *testing.T) {
 	files := make(map[string]bool)
 	for _, entry := range r.File {
 		files[strings.TrimPrefix(entry.Name, m.Path+"@"+m.Version+"/")] = true
-		for _, forbidden := range []string{"/.git/", "/.venv/", "/internal/e2e/", "/internal/conformancetest/", "/var/"} {
+		for _, forbidden := range []string{"/.git/", "/.venv/", "/_examples/", "/internal/e2e/", "/internal/conformancetest/", "/var/"} {
 			if strings.Contains(entry.Name, forbidden) {
 				t.Fatal("archive includes non-SDK assets:", entry.Name)
 			}
 		}
 	}
 	// Native selection and all platform backends are ordinary root-module
-	// packages. Examples are public source, not private harness assets; ignore
-	// directives and the leading underscore only affect package discovery.
+	// packages. Examples are independent applications with their own modules,
+	// not part of the distributable SDK module.
 	for _, required := range []string{
 		"audio/native/output.go", "audio/native/select_linux.go", "audio/native/select_darwin.go", "audio/native/select_windows.go", "audio/native/select_other.go",
 		"audio/alsa/output.go", "audio/pipewire/output.go", "audio/coreaudio/output.go", "audio/wasapi/output.go", "audio/noop/output.go",
-		"_examples/player/main.go", "_examples/external-control/main.go", "internal/loopbackcmd/main.go",
+		"internal/loopbackcmd/main.go",
 	} {
 		if !files[required] {
 			t.Error("archive omits root-module source:", required)
@@ -65,15 +75,7 @@ func TestModuleArchive(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	// ./... deliberately skips _examples. Build them explicitly from the
-	// archive too, without writing binaries into the extracted module.
-	cmd := exec.CommandContext(ctx, "go", "build", "./_examples/player", "./_examples/external-control")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("archived examples failed: %v\n%s", err, out)
-	}
-	cmd = exec.CommandContext(ctx, "go", "test", "./...")
+	cmd := exec.CommandContext(ctx, "go", "test", "./...")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "SENDSPIN_ARCHIVE_INNER=1")
 	if out, err := cmd.CombinedOutput(); err != nil {

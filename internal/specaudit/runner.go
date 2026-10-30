@@ -81,7 +81,7 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 	case "reference":
 		return goTest(".", "-race", "-tags=timefilter_reference", "-timeout=2m", "./internal/timesync"), nil
 	case "examples":
-		calls := goTest(".", "./_examples/player", "./_examples/external-control")
+		calls := append(goTest("_examples/player", "./..."), goTest("_examples/external-control", "./...")...)
 		for i := range calls {
 			calls[i].env = []string{"CGO_ENABLED=0"}
 		}
@@ -354,7 +354,7 @@ func suiteScope(suite string) string {
 	case "desktop-audio-e2e", "alsa-e2e":
 		return "Platform-tagged explicit output, marker loopback and Source/input E2E opt-ins; absent device consent is a visible skip, never hardware evidence; fake/virtual fixtures are separate software-only coverage"
 	case "examples":
-		return "CGO-free example selection and offline synthetic WAV analysis tests; no audio device, capture or physical measurement"
+		return "CGO-free independent player and external-control example module tests; no audio device, capture or physical measurement"
 	}
 	return ""
 }

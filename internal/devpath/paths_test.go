@@ -13,20 +13,22 @@ func TestPrepareAndSuitePathsStayInsideVar(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "var"))
-	if err != nil || len(entries) != 1 || entries[0].Name() != "go.mod" {
-		t.Fatal("preparation must only create the module boundary", entries, err)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("preparation must not create a module boundary", entries, err)
 	}
-	marker := filepath.Join(root, "var", "go.mod")
-	before, err := os.ReadFile(marker)
-	if err != nil {
+	artifact := filepath.Join(root, "var", "existing-artifact.txt")
+	if err = os.WriteFile(artifact, []byte("keep existing output"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = Prepare(root); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(marker)
-	if err != nil || string(before) != string(after) {
-		t.Fatal("preparation rewrote module boundary", err)
+	after, err := os.ReadFile(artifact)
+	if err != nil || string(after) != "keep existing output" {
+		t.Fatal("preparation changed existing output", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "var", "go.mod")); !os.IsNotExist(err) {
+		t.Fatal("preparation recreated a nested module", err)
 	}
 	if Python(root, "e2e") == Python(root, "conformance") {
 		t.Fatal("test suites share a Python environment")
