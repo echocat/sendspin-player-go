@@ -4,7 +4,10 @@ package sendspin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -29,6 +32,21 @@ func referenceEventCount(t *testing.T, ref referenceServer, kind, reason string)
 		}
 	}
 	return count
+}
+
+func referenceGoodbyeObserved(t *testing.T, ref referenceServer, reason string) bool {
+	t.Helper()
+	status := ref.control(t, map[string]any{"command": "status"})
+	for _, raw := range status["events"].([]any) {
+		event := raw.(map[string]any)
+		// Both sources belong to the independent peer: its native dispatcher
+		// exposes the parsed reason when available; the wire observer covers
+		// the closed-reader tail. A nil reason or a Go-local error is no proof.
+		if event["reason"] == reason && (event["type"] == "disconnected" || event["type"] == "wire_goodbye") {
+			return true
+		}
+	}
+	return false
 }
 
 func referenceArbitrationReady(t *testing.T, client *Client, ref referenceServer, playback bool) {
@@ -127,7 +145,7 @@ func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T
 		t.Fatal("pair-init did not reach its transmit barrier")
 	}
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
-	eventually(t, func() bool { return referenceEventCount(t, playback, "wire_goodbye", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceGoodbyeObserved(t, playback, "concurrent_attempt") })
 	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("already transmitted pair-init was displaced")
@@ -212,10 +230,10 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			}
 			if tc.wantCandidate {
 				referenceArbitrationReady(t, client, b, tc.candidatePlayback)
-				eventually(t, func() bool { return referenceEventCount(t, a, "wire_goodbye", "another_server") > 0 })
+				eventually(t, func() bool { return referenceGoodbyeObserved(t, a, "another_server") })
 				eventually(t, func() bool { return referenceEventCount(t, a, "disconnected", "") > 0 })
 			} else {
-				eventually(t, func() bool { return referenceEventCount(t, b, "wire_goodbye", "concurrent_attempt") > 0 })
+				eventually(t, func() bool { return referenceGoodbyeObserved(t, b, "concurrent_attempt") })
 				eventually(t, func() bool { return referenceEventCount(t, b, "disconnected", "") > 0 })
 				if got := client.Snapshot().ServerID; got != a.id {
 					t.Fatal("rejected candidate displaced current server", got)
@@ -244,6 +262,34 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 	}
 	t.Run("readiness-includes-controller-state", referenceArbitrationReadinessIncludesControllerState)
 	t.Run("concurrent-peers-keep-controller-observations-isolated", referenceConcurrentPeersKeepControllerObservationsIsolated)
+	t.Run("goodbye-witness-requires-peer-reason", referenceGoodbyeWitnessRequiresPeerReason)
+}
+
+func referenceGoodbyeWitnessRequiresPeerReason(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind string
+		reason     any
+		want       bool
+	}{
+		{"native-dispatcher", "disconnected", "concurrent_attempt", true},
+		{"closed-reader-frame", "wire_goodbye", "concurrent_attempt", true},
+		{"missing-native-reason", "disconnected", nil, false},
+		{"wrong-native-reason", "disconnected", "shutdown", false},
+		{"wrong-frame-reason", "wire_goodbye", "shutdown", false},
+		{"local-error-is-not-peer-evidence", "local_error", "concurrent_attempt", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"events": []any{map[string]any{"type": tc.kind, "reason": tc.reason}}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			if got := referenceGoodbyeObserved(t, referenceServer{url: server.URL}, "concurrent_attempt"); got != tc.want {
+				t.Fatalf("peer goodbye evidence = %t, want %t", got, tc.want)
+			}
+		})
+	}
 }
 
 func referenceArbitrationReadinessIncludesControllerState(t *testing.T) {
@@ -390,7 +436,7 @@ func TestE2EReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
 		return pairing.control(t, map[string]any{"command": "status"})["pair_finalize_pending"] == true
 	})
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
-	eventually(t, func() bool { return referenceEventCount(t, playback, "wire_goodbye", "concurrent_attempt") > 0 })
+	eventually(t, func() bool { return referenceGoodbyeObserved(t, playback, "concurrent_attempt") })
 	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("in-progress pairing displaced")
