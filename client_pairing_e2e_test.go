@@ -248,7 +248,9 @@ func TestE2EReferenceUnauthorizedPrecedesUnsupportedPairing(t *testing.T) {
 	if !errors.As(connection.err, &goodbye) || goodbye.Reason != "unauthorized" {
 		t.Fatal("wrong refusal priority", connection.err)
 	}
-	eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "unauthorized") == 1 })
+	eventually(t, func() bool {
+		return referenceGoodbyeObserved(t, ref, "unauthorized") && referenceEventCount(t, ref, "disconnected", "") == 1
+	})
 	if referenceEventCount(t, ref, "pair_abort", "") != 0 {
 		t.Fatal("sent pairing abort before required goodbye")
 	}
@@ -402,7 +404,9 @@ func TestE2EReferenceDisplacementSurvivesRejectedRehandshakeActivation(t *testin
 	// finishing the handoff must not depend on the old server sending one.
 	eventually(t, func() bool { return client.Snapshot().ServerID == b.id && client.Snapshot().Available })
 	a.control(t, map[string]any{"command": "release_activation"})
-	eventually(t, func() bool { return referenceEventCount(t, a, "disconnected", "another_server") == 1 })
+	eventually(t, func() bool {
+		return referenceGoodbyeObserved(t, a, "another_server") && referenceEventCount(t, a, "disconnected", "") == 1
+	})
 	if referenceEventCount(t, a, "pair_abort", "method_not_supported") != 1 || referenceEventCount(t, a, "pair_finalize", "") != 0 {
 		t.Fatal("displaced unsupported attempt was started instead of refused")
 	}

@@ -51,23 +51,30 @@ func TestE2EReferenceConcurrentInadmissibleActivationsCannotEnterAdmission(t *te
 		peer.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
 	}
 	eventually(t, func() bool {
-		return referenceEventCount(t, unauthorized, "disconnected", "unauthorized") > 0 && referenceEventCount(t, unpaired, "disconnected", "pairing_required") > 0 && referenceEventCount(t, malformed, "disconnected", "") > 0
+		reasons := referenceGoodbyeObserved(t, unauthorized, "unauthorized") && referenceGoodbyeObserved(t, unpaired, "pairing_required")
+		closed := referenceEventCount(t, unauthorized, "disconnected", "") > 0 && referenceEventCount(t, unpaired, "disconnected", "") > 0 && referenceEventCount(t, malformed, "disconnected", "") > 0
+		return reasons && closed
 	})
 	for _, peer := range []referenceServer{unauthorized, malformed, unpaired} {
 		peer.control(t, map[string]any{"command": "disconnect", "url": endpoint})
 	}
+	eventually(t, func() bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return len(client.sessions) == 1
+	})
 	// The reference connector may retry after a refusal. Fault injection must
 	// remain invalid on those later connections too: otherwise an unrelated
 	// valid retry can block on the deliberately held admission lock and use up
 	// the fixture's provisional slots. Exercise that second generation directly.
-	unauthorizedBefore := referenceEventCount(t, unauthorized, "disconnected", "unauthorized")
+	unauthorizedBefore := referenceGoodbyeObservations(t, unauthorized, "unauthorized")
 	malformedBefore := referenceEventCount(t, malformed, "disconnected", "")
-	unpairedBefore := referenceEventCount(t, unpaired, "disconnected", "pairing_required")
+	unpairedBefore := referenceGoodbyeObservations(t, unpaired, "pairing_required")
 	for _, peer := range []referenceServer{unauthorized, malformed, unpaired} {
 		peer.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
 	}
 	eventually(t, func() bool {
-		return referenceEventCount(t, unauthorized, "disconnected", "unauthorized") > unauthorizedBefore && referenceEventCount(t, unpaired, "disconnected", "pairing_required") > unpairedBefore && referenceEventCount(t, malformed, "disconnected", "") > malformedBefore
+		return referenceGoodbyeObservations(t, unauthorized, "unauthorized") > unauthorizedBefore && referenceGoodbyeObservations(t, unpaired, "pairing_required") > unpairedBefore && referenceEventCount(t, malformed, "disconnected", "") > malformedBefore
 	})
 	for _, peer := range []referenceServer{unauthorized, malformed, unpaired} {
 		peer.control(t, map[string]any{"command": "disconnect", "url": endpoint})
@@ -211,7 +218,9 @@ func TestE2EReferenceFullRecordStoreProtectsThreeUnfinishedHandshakes(t *testing
 	}
 	resume()
 	for _, peer := range peers {
-		eventually(t, func() bool { return referenceEventCount(t, peer, "disconnected", "concurrent_attempt") == 1 })
+		eventually(t, func() bool {
+			return referenceGoodbyeObserved(t, peer, "concurrent_attempt") && referenceEventCount(t, peer, "disconnected", "") == 1
+		})
 		peer.control(t, map[string]any{"command": "disconnect", "url": endpoint})
 	}
 	eventually(t, func() bool { client.mu.Lock(); defer client.mu.Unlock(); return len(client.sessions) == 1 })

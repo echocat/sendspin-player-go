@@ -36,17 +36,25 @@ func referenceEventCount(t *testing.T, ref referenceServer, kind, reason string)
 
 func referenceGoodbyeObserved(t *testing.T, ref referenceServer, reason string) bool {
 	t.Helper()
+	return referenceGoodbyeObservations(t, ref, reason) > 0
+}
+
+func referenceGoodbyeObservations(t *testing.T, ref referenceServer, reason string) int {
+	t.Helper()
 	status := ref.control(t, map[string]any{"command": "status"})
+	count := 0
 	for _, raw := range status["events"].([]any) {
 		event := raw.(map[string]any)
 		// Both sources belong to the independent peer: its native dispatcher
 		// exposes the parsed reason when available; the wire observer covers
 		// the closed-reader tail. A nil reason or a Go-local error is no proof.
 		if event["reason"] == reason && (event["type"] == "disconnected" || event["type"] == "wire_goodbye") {
-			return true
+			count++
 		}
 	}
-	return false
+	// These are observations, not connections: both native paths can witness
+	// one refusal. Compare generations, but do not assert a connection count.
+	return count
 }
 
 func referenceArbitrationReady(t *testing.T, client *Client, ref referenceServer, playback bool) {
