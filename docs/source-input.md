@@ -1,6 +1,6 @@
 # Opt-in source@v1 / audio input extension
 
-SDK includes this opt-in extension implementing the **source** role in
+SDK **v0.2.0** includes this opt-in extension implementing the **source** role in
 the same pinned Sendspin profile, not a private wire protocol and not a new
 specification version:
 
@@ -14,7 +14,7 @@ specification version:
   consumes the native decoded SourceStream; its optional wire probe only observes
   encrypted transport output/order. It does not replace protocol handling.
 
-SDK, core wire version `1` and the role version `source@v1` are separate
+SDK v0.2.0, core wire version `1` and the role version `source@v1` are separate
 version axes; the specification and independent-peer pins above are unchanged.
 
 The frozen primary player-profile inventory and its historical assessments are
