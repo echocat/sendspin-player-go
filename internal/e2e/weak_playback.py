@@ -50,7 +50,7 @@ class WeakPlayback:
                 tick += .1
                 await asyncio.sleep(max(0, tick - asyncio.get_running_loop().time()))
 
-        self.task = asyncio.create_task(produce())
+        self.task = asyncio.create_task(produce(), name="weak-reference-producer")
         return {"source_frames": self.frames}
 
     async def stop(self, client):

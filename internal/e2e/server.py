@@ -2,14 +2,14 @@
 
 Only test control is ours: Noise, pairing, negotiation, chunking, encoding and
 clock replies are implemented by the independent library. Secrets arrive through
-a private temporary config file, never process arguments or protocol logs.
+the private loopback management API, never process arguments or protocol logs.
 """
 
-import argparse
 import asyncio
 import hashlib
 import json
 import logging
+import os
 import struct
 from aiohttp import web
 from aiosendspin.models.types import ConnectionReason, PairMethod, PairingCodeFormat
@@ -28,9 +28,8 @@ from aiosendspin.server.server import (
     SendspinServer,
 )
 
-from mdns import MDNSPeer
 from media import MediaControls
-from pairing_observer import PairingObserver
+from pairing_observer import PairingObserver, TransportScope, current_scope
 from source_controls import SourceControls
 from weak_playback import WeakPlayback
 
@@ -66,10 +65,34 @@ class InjectedMessage:
         return None
 
 
-async def main(config_path):
-    with open(config_path, encoding="utf-8") as source:
-        config = json.load(source)
+async def run_peer(config, ready, stop):
+    scope = TransportScope()
+    current_scope.set(scope)
+    try:
+        await configure_peer(config, ready, stop, scope)
+    finally:
+        # Also cover failed startup and cancellation before readiness. A broken
+        # peer must not leave background tasks in the package-wide worker.
+        for release in getattr(scope, "release_gates", ()):
+            release()
+        server = getattr(scope, "server", None)
+        if server is not None and not getattr(scope, "server_closed", False):
+            try:
+                await asyncio.wait_for(server.close(), 6)
+            except Exception:
+                pass
+        tasks = list(scope.tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        runner = getattr(scope, "runner", None)
+        if runner is not None:
+            await runner.cleanup()
+
+
+async def configure_peer(config, ready, stop, scope):
     store = ControlledStore()
+    scope.release_gates = [store.gate.set]
     client_id = config["client_id"]
     psk = b64url_decode(config["psk"])
     device_psk = b64url_decode(config.get("device_pairing_psk", config["psk"]))
@@ -94,9 +117,14 @@ async def main(config_path):
         pairing_store=store,
         allow_noncompliant_clients=False,
     )
+    scope.server = server
     if config.get("hold_pairing", False):
         store.gate.clear()
     events = []
+    scope.events = events
+    scope.release_gates.append(scope.activation_gate.set)
+    if config.get("hold_after_activation", False):
+        scope.activation_gate.clear()
     pairing_observer = (
         PairingObserver(
             events,
@@ -111,6 +139,8 @@ async def main(config_path):
         )
         if config.get("observe_pairing", False) or config.get("observe_controls", False) or config.get("observe_core", False) else None
     )
+    if pairing_observer is not None:
+        scope.release_gates.append(pairing_observer.close)
 
     def observe_event(_server, event):
         if isinstance(event, ClientDisconnectedEvent):
@@ -125,15 +155,14 @@ async def main(config_path):
 
     server.add_event_listener(observe_event)
     media = MediaControls(server)
+    scope.release_gates.append(media.close)
     sources = SourceControls(server, client_id) if config.get("observe_source", False) else None
     weak = WeakPlayback(config["weak_reference_path"]) if "weak_reference_path" in config else None
     stream = None
     pump_task = None
     pump_stop = None
     pump_samples = 0
-    stop = asyncio.Event()
     operator_codes = asyncio.Queue()
-    mdns = MDNSPeer(server, config["mdns"], client_id) if "mdns" in config else None
 
     async def control(request):
         nonlocal stream, pump_task, pump_stop, pump_samples
@@ -152,7 +181,13 @@ async def main(config_path):
             if kind == "weak_status":
                 player = client.role("player@v1") if client is not None and client.is_connected else None
                 selected = player.preferred_codec if player is not None else None
-                return web.json_response({"codec": selected.value if selected is not None else None, "source_frames": weak.frames})
+                return web.json_response({
+                    "codec": selected.value if selected is not None else None,
+                    "source_frames": weak.frames,
+                    "producer_active": weak.task is not None,
+                    "producer_tasks": sum(task.get_name() == "weak-reference-producer" for task in asyncio.all_tasks()),
+                    "worker_pid": os.getpid(),
+                })
             if client is None or client.connection is None or weak.task is not None:
                 raise web.HTTPConflict(text="disconnect needs a connected client and stopped producer")
             await client.connection.disconnect()
@@ -239,6 +274,8 @@ async def main(config_path):
             if pairing_observer is None:
                 raise web.HTTPConflict(text="pairing observer is not enabled")
             pairing_observer.followup_gate.set()
+        elif kind == "release_activation_send":
+            scope.activation_gate.set()
         elif kind == "disconnect":
             server.disconnect_from_client(command["url"])
         elif kind == "forget":
@@ -263,7 +300,6 @@ async def main(config_path):
                     "pairing_record": await store.record_by_client_id(client_id) is not None,
                     "pair_finalize_pending": store.pending > 0,
                     "events": events,
-                    "mdns": mdns.status() if mdns is not None else None,
                     "client_name": client.info.name if client is not None and client.is_connected else None,
                 }
             )
@@ -339,43 +375,138 @@ async def main(config_path):
             raise web.HTTPBadRequest(text="unknown test command")
         return web.json_response({"ok": True})
 
-    app = web.Application()
+    @web.middleware
+    async def scoped_request(request, handler):
+        token = current_scope.set(scope)
+        try:
+            return await handler(request)
+        finally:
+            current_scope.reset(token)
+
+    app = web.Application(middlewares=[scoped_request])
     app.router.add_get("/sendspin", server.on_client_connect)
     app.router.add_post("/control", control)
     runner = web.AppRunner(app, shutdown_timeout=2)
+    scope.runner = runner
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0" if mdns is not None else "127.0.0.1", 0)
+    site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     # aiohttp exposes bound sockets on AppRunner's addresses without reserving
     # and reopening a port (which would introduce a race).
     port = runner.addresses[0][1]
-    if mdns is not None and config["mdns"].get("family") == 6:
-        await web.TCPSite(runner, "::", port).start()
-    if mdns is not None:
-        await mdns.start(port)
-    print(json.dumps({"url": f"http://127.0.0.1:{port}", "server_id": server.id}), flush=True)
+    ready.set_result({"URL": f"http://127.0.0.1:{port}", "ID": server.id})
     try:
-        await stop.wait()
+        try:
+            await asyncio.wait_for(stop.wait(), config.get("lifetime_seconds", 90))
+        except TimeoutError:
+            pass  # Peer budget, never a timeout on the package-wide worker.
     finally:
+        # Open every test gate before joining writers, finalize tasks and sockets.
+        await site.stop()
+        store.gate.set()
+        scope.activation_gate.set()
+        if pairing_observer is not None:
+            pairing_observer.close()
+        media.close()
         if weak is not None:
             await weak.close()
         if pump_task is not None:
             pump_task.cancel()
             await asyncio.gather(pump_task, return_exceptions=True)
-        media.close()
-        if mdns is not None:
-            await mdns.close()
-        await server.close()
-        if sources is not None:
-            await sources.close()
+        try:
+            await asyncio.wait_for(server.close(), 6)
+            scope.server_closed = True
+        finally:
+            if sources is not None:
+                await sources.close()
+
+
+async def main():
+    peers = {}
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def task_factory(loop, coro, context=None, **kwargs):
+        scope = context.get(current_scope) if context is not None else current_scope.get()
+        task = asyncio.Task(coro, loop=loop, context=context, **kwargs)
+        if scope is not None:
+            task._e2e_scope = scope
+            scope.tasks.add(task)
+            task.add_done_callback(scope.tasks.discard)
+        return task
+
+    loop.set_task_factory(task_factory)
+
+    async def add_peer(request):
+        config = await request.json()
+        lifetime = config.get("lifetime_seconds", 90)
+        if not isinstance(lifetime, (int, float)) or not 0 < lifetime <= 31 * 60:
+            raise web.HTTPBadRequest(text="invalid peer budget")
+        ready = loop.create_future()
+        peer_stop = asyncio.Event()
+        task = asyncio.create_task(run_peer(config, ready, peer_stop))
+        # Track startup as well, so a failing/cancelled request cannot orphan it.
+        provisional = str(id(task))
+        peers[provisional] = (task, peer_stop)
+        try:
+            done, _ = await asyncio.wait((ready, task), timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            if ready not in done:
+                raise web.HTTPInternalServerError(text="peer startup failed")
+            reference = ready.result()
+            peers[reference["ID"]] = peers.pop(provisional)
+            return web.json_response(reference)
+        except BaseException:
+            peer_stop.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            peers.pop(provisional, None)
+            raise
+
+    async def remove_peer(request):
+        peer = peers.pop(request.match_info["id"], None)
+        if peer is not None:
+            task, peer_stop = peer
+            peer_stop.set()
+            result = await asyncio.gather(task, return_exceptions=True)
+            if isinstance(result[0], BaseException):
+                raise web.HTTPInternalServerError(text="peer cleanup failed")
+        return web.json_response({"ok": True})
+
+    async def shutdown(_request):
+        stop.set()
+        return web.json_response({"ok": True})
+
+    async def status(_request):
+        return web.json_response({
+            "pid": os.getpid(), "peers": len(peers),
+            "peer_tasks": sum(getattr(task, "_e2e_scope", None) is not None for task in asyncio.all_tasks()),
+        })
+
+    app = web.Application()
+    app.router.add_post("/peers", add_peer)
+    app.router.add_delete("/peers/{id}", remove_peer)
+    app.router.add_post("/shutdown", shutdown)
+    app.router.add_get("/status", status)
+    runner = web.AppRunner(app, shutdown_timeout=2)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    print(json.dumps({"kind": "sendspin-e2e-manager", "url": f"http://127.0.0.1:{runner.addresses[0][1]}"}), flush=True)
+    try:
+        await stop.wait()
+    finally:
+        for _, peer_stop in peers.values():
+            peer_stop.set()
+        results = await asyncio.gather(*(task for task, _ in peers.values()), return_exceptions=True)
+        peers.clear()
         await runner.cleanup()
-        if pairing_observer is not None:
-            pairing_observer.close()
+        if any(isinstance(result, BaseException) for result in results):
+            raise RuntimeError("peer cleanup failed")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.WARNING)
-    asyncio.run(main(args.config))
+    # A library exception may contain an injected settings body. Go reports
+    # phase/status diagnostics instead of emitting protocol/key material.
+    logging.disable(logging.CRITICAL)
+    asyncio.run(main())

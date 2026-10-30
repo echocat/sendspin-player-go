@@ -35,7 +35,7 @@ func helloFieldClient(t *testing.T, payload map[string]any, observe diagnostic.O
 	return client, ref, store, connectReference(t, client, ref)
 }
 
-func TestReferenceRejectsMalformedServerHelloBeforeReply(t *testing.T) {
+func TestE2EReferenceRejectsMalformedServerHelloBeforeReply(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		payload map[string]any
@@ -88,7 +88,7 @@ func TestReferenceRejectsMalformedServerHelloBeforeReply(t *testing.T) {
 	}
 }
 
-func TestReferenceServerLanguageHintsRemainVerbatimAcrossRehandshake(t *testing.T) {
+func TestE2EReferenceServerLanguageHintsRemainVerbatimAcrossRehandshake(t *testing.T) {
 	want := []string{"DE-de", "i-klingon", "x-vendor", "zz-Zzzz-999-future1", "DE-de"}
 	var hellos atomic.Int32
 	client, ref, _, connection := helloFieldClient(t, map[string]any{
@@ -127,7 +127,7 @@ func TestReferenceServerLanguageHintsRemainVerbatimAcrossRehandshake(t *testing.
 	}
 }
 
-func TestReferenceServerHelloLanguagesAreOptional(t *testing.T) {
+func TestE2EReferenceServerHelloLanguagesAreOptional(t *testing.T) {
 	client, _, _, _ := helloFieldClient(t, map[string]any{"name": "", "future@v2_support": nil}, nil)
 	eventually(t, func() bool { return client.Snapshot().Available })
 	if state := client.Snapshot(); state.ServerName != "" || state.ServerLanguages != nil {

@@ -1,85 +1,16 @@
-//go:build e2e
-
 package audiotest
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
 )
-
-// This independent-server helper test is deliberately fake/software-only. Its
-// ENV, name and receipt cannot be mistaken for any native backend input test.
-func TestReferenceServerFakeInputScenario(t *testing.T) {
-	if os.Getenv("SENDSPIN_AUDIOTEST_SOURCE_E2E_FAKE") != "1" {
-		t.Skip("explicit software-only Source fixture opt-in required; no native input used")
-	}
-	artifacts := t.TempDir()
-	t.Setenv("SENDSPIN_FAKE_SOURCE_E2E_DEVICE", "synthetic-input-not-hardware")
-	t.Setenv("SENDSPIN_FAKE_SOURCE_E2E_ROOT", repositoryRoot(t))
-	t.Setenv("SENDSPIN_FAKE_SOURCE_E2E_ARTIFACT_DIR", artifacts)
-	var factories atomic.Int64
-	runReferenceServerInputScenario(t, SourceScenarioConfig{Prefix: "SENDSPIN_FAKE", InputFactory: func(device string) audio.Input {
-		factories.Add(1)
-		if device != "synthetic-input-not-hardware" {
-			return nil
-		}
-		return sourceFakeInput{}
-	}}, true)
-	if factories.Load() != 2 {
-		t.Fatal("explicit source starts did not bind the same fake device twice")
-	}
-	files, err := filepath.Glob(filepath.Join(artifacts, "source-e2e-*", "source-e2e-report.json"))
-	if err != nil || len(files) != 1 {
-		t.Fatal("missing software-only source receipt", err)
-	}
-	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var receipt sourceReceipt
-	if err := json.Unmarshal(data, &receipt); err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Status != "pass" || !receipt.Virtual || receipt.CaptureOpened || receipt.OutputOpened || receipt.SoftwareFixture || receipt.DecodedFrames <= 0 || receipt.PhysicalConformance {
-		t.Fatal("fake fixture mislabeled as native/physical evidence")
-	}
-}
-
-type sourceFakeInput struct{}
-type sourceFakeDevice struct{}
-
-func (sourceFakeInput) Open(ctx context.Context, f audio.Format) (audio.InputDevice, error) {
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if f != sourceCaptureFormat {
-		return nil, errors.New("unexpected fake source format")
-	}
-	return sourceFakeDevice{}, nil
-}
-func (sourceFakeDevice) Read(ctx context.Context, dst []float32) (int, time.Time, error) {
-	duration := time.Duration(len(dst)/2) * time.Second / 48000
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return 0, time.Time{}, ctx.Err()
-	case <-timer.C:
-	}
-	clear(dst)
-	return len(dst), time.Now().Add(-duration), nil
-}
-func (sourceFakeDevice) Close() error { return nil }
 
 type sourceStubInput struct {
 	device audio.InputDevice

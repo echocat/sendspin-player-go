@@ -3,7 +3,6 @@
 package sendspin
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -15,8 +14,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -25,7 +22,6 @@ import (
 
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/codec"
-	"github.com/echocat/sendspin-player-go/internal/devpath"
 )
 
 // clockOutput is an instrumented fake device, not proof of physical sync.
@@ -66,9 +62,6 @@ func (d *clockDevice) Close() error                { return nil }
 
 type referenceServer struct{ url, id string }
 
-var referenceSetup sync.Once
-var referenceSetupErr error
-
 func (r referenceServer) control(t *testing.T, payload map[string]any) map[string]any {
 	t.Helper()
 	data, _ := json.Marshal(payload)
@@ -102,84 +95,13 @@ func startReferenceWithBudget(t *testing.T, cred Credentials, psk Secret, pairin
 	if lifetime <= 0 || lifetime > 31*time.Minute {
 		t.Fatal("invalid bounded fixture lifetime")
 	}
-	config := filepath.Join(t.TempDir(), "config.json")
 	settings := map[string]any{"client_id": cred.ClientID(), "psk": base64.RawURLEncoding.EncodeToString(psk[:]), "pairing": pairing}
 	for key, value := range options {
 		settings[key] = value
 	}
-	b, _ := json.Marshal(settings)
-	if err := os.WriteFile(config, b, 0600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
-	root, err := os.Getwd()
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	if err = devpath.Prepare(root); err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	referenceSetup.Do(func() {
-		setup := exec.CommandContext(ctx, "uv", "sync", "--locked", "--project", "internal/e2e")
-		setup.Env = devpath.PythonEnv(root, "e2e")
-		out, err := setup.CombinedOutput()
-		if err != nil {
-			referenceSetupErr = fmt.Errorf("uv sync: %w\n%s", err, out)
-		}
-	})
-	if referenceSetupErr != nil {
-		cancel()
-		t.Fatal(referenceSetupErr)
-	}
-	python := devpath.Python(root, "e2e")
-	cmd := exec.CommandContext(ctx, python, "internal/e2e/server.py", "--config", config)
-	cmd.Env = devpath.PythonEnv(root, "e2e")
-	cmd.WaitDelay = 2 * time.Second
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	if err = cmd.Start(); err != nil {
-		cancel()
-		t.Fatalf("uv is required for E2E (mise install): %v", err)
-	}
-	finished := make(chan error, 1)
-	go func() { finished <- cmd.Wait() }()
-	t.Cleanup(func() {
-		cancel()
-		err := <-finished
-		if t.Failed() {
-			t.Logf("reference server exit: %v\n%s", err, stderr.String())
-		}
-	})
-	ready := make(chan []byte, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		if scanner.Scan() {
-			ready <- append([]byte(nil), scanner.Bytes()...)
-		} else {
-			ready <- nil
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		t.Fatal("reference server startup timeout")
-	case line := <-ready:
-		var msg struct {
-			URL string `json:"url"`
-			ID  string `json:"server_id"`
-		}
-		if err = json.Unmarshal(line, &msg); err != nil || msg.URL == "" {
-			t.Fatalf("reference server failed to start: %v (see cleanup log)", err)
-		}
-		return referenceServer{msg.URL, msg.ID}
-	}
-	return referenceServer{}
+	settings["lifetime_seconds"] = lifetime.Seconds()
+	ref := referenceSuite.Reference(t, settings)
+	return referenceServer{ref.URL, ref.ID}
 }
 
 func eventually(t *testing.T, condition func() bool) {
@@ -194,7 +116,7 @@ func eventually(t *testing.T, condition func() bool) {
 	t.Fatal("condition did not become true")
 }
 
-func TestReferenceServer(t *testing.T) {
+func TestE2EReferenceServer(t *testing.T) {
 	for _, codecName := range []string{"pcm", "flac", "opus"} {
 		for _, suite := range []string{"25519_ChaChaPoly_SHA256", "25519_AESGCM_SHA256"} {
 			t.Run(codecName+"/"+suite, func(t *testing.T) {
@@ -286,7 +208,7 @@ func TestReferenceServer(t *testing.T) {
 	}
 }
 
-func TestReferencePSKPairingServerInitiated(t *testing.T) {
+func TestE2EReferencePSKPairingServerInitiated(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	store := FileStore{Path: filepath.Join(t.TempDir(), "device.json")}

@@ -39,6 +39,11 @@ type oracleCase struct {
 }
 
 func TestPinnedPythonDifferentialCorpus(t *testing.T) {
+	checkPinnedPythonDifferentialCorpus(t)
+}
+
+func checkPinnedPythonDifferentialCorpus(t *testing.T) {
+	t.Helper()
 	raw, err := os.ReadFile("testdata/python-differential.json")
 	if err != nil {
 		t.Fatal(err)

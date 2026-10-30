@@ -1,5 +1,3 @@
-//go:build e2e
-
 package audiotest
 
 import (
@@ -47,16 +45,6 @@ type sourceObservation struct {
 func sourceObject(raw json.RawMessage) bool {
 	var object map[string]json.RawMessage
 	return json.Unmarshal(raw, &object) == nil && object != nil && len(object) == 0
-}
-
-func (s sourceObservation) ready() bool {
-	ready := false
-	for _, event := range s.Events {
-		if event.Type == "client/state" {
-			ready = event.Available && sourceObject(event.Source)
-		}
-	}
-	return ready
 }
 
 // validateSourceObservation verifies independent-decoder geometry, FIFO ordering

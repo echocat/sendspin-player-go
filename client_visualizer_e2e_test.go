@@ -50,7 +50,7 @@ func allVisualizerTypes() VisualizerConfig {
 	return VisualizerConfig{Types: []string{"loudness", "beat", "f_peak", "spectrum", "peak"}, RateMax: 30, Spectrum: &Spectrum{Bins: 4, Scale: "lin", MinFrequency: 0, MaxFrequency: 20000}}
 }
 
-func TestReferenceVisualizerStreamConditionalSchemaClosesSilently(t *testing.T) {
+func TestE2EReferenceVisualizerStreamConditionalSchemaClosesSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		fields map[string]any
@@ -71,7 +71,7 @@ func TestReferenceVisualizerStreamConditionalSchemaClosesSilently(t *testing.T) 
 	}
 }
 
-func TestReferenceVisualizerReservedBitsAndIDsAndStaleFrames(t *testing.T) {
+func TestE2EReferenceVisualizerReservedBitsAndIDsAndStaleFrames(t *testing.T) {
 	client, ref, events, counts, _ := referenceVisualizerProtocolClient(t, VisualizerConfig{Types: []string{"beat"}, RateMax: 30})
 	mediaCommand(t, client, ref, map[string]any{"command": "visualizer_start", "tracks_downbeats": false})
 	before := counts[17].Load()
@@ -129,7 +129,7 @@ func TestReferenceVisualizerReservedBitsAndIDsAndStaleFrames(t *testing.T) {
 	}
 }
 
-func TestReferenceVisualizerDuplicateEchoAndUpdateKeepTimestampOrder(t *testing.T) {
+func TestE2EReferenceVisualizerDuplicateEchoAndUpdateKeepTimestampOrder(t *testing.T) {
 	client, ref, events, _, connection := referenceVisualizerProtocolClient(t, VisualizerConfig{Types: []string{"loudness"}, RateMax: 30})
 	mediaCommand(t, client, ref, map[string]any{"command": "visualizer_start"})
 	sendPairingFixtureMessage(t, ref, "stream/start", map[string]any{"server_transmitted": 0, "visualizer": map[string]any{"types": []string{"loudness", "loudness"}, "rate_max": 20, "future": nil}})
@@ -151,7 +151,7 @@ func TestReferenceVisualizerDuplicateEchoAndUpdateKeepTimestampOrder(t *testing.
 	requireSilentProtocolClose(t, connection, ref)
 }
 
-func TestReferenceMalformedVisualizerPayloadsCloseSilently(t *testing.T) {
+func TestE2EReferenceMalformedVisualizerPayloadsCloseSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		frame []byte
@@ -172,7 +172,7 @@ func TestReferenceMalformedVisualizerPayloadsCloseSilently(t *testing.T) {
 	}
 }
 
-func TestReferenceEmptyVisualizerTypesPermitStreamButNoKnownFrames(t *testing.T) {
+func TestE2EReferenceEmptyVisualizerTypesPermitStreamButNoKnownFrames(t *testing.T) {
 	client, ref, _, _, connection := referenceVisualizerProtocolClient(t, VisualizerConfig{Types: []string{}, RateMax: 30})
 	mediaCommand(t, client, ref, map[string]any{"command": "visualizer_start"})
 	if !slices.Contains(client.Snapshot().ActiveStreams, "visualizer") {

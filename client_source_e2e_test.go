@@ -52,7 +52,7 @@ func sourceReferenceClient(t *testing.T, unpaired bool, combinedPlayer ...bool) 
 	}
 	return client, input, ref
 }
-func TestReferenceSourcePCMInputLifecycleAndReconnect(t *testing.T) {
+func TestE2EReferenceSourcePCMInputLifecycleAndReconnect(t *testing.T) {
 	client, input, ref := sourceReferenceClient(t, false, true)
 	connection := connectReference(t, client, ref)
 	eventually(t, func() bool { return client.Snapshot().Available })
@@ -176,7 +176,7 @@ func TestReferenceSourcePCMInputLifecycleAndReconnect(t *testing.T) {
 	eventually(t, func() bool { return input.closes.Load() == 4 })
 }
 
-func TestReferenceSourceRequiresExplicitUnpairedRoleApproval(t *testing.T) {
+func TestE2EReferenceSourceRequiresExplicitUnpairedRoleApproval(t *testing.T) {
 	client, input, ref := sourceReferenceClient(t, true)
 	connectReference(t, client, ref)
 	eventually(t, func() bool { return client.Snapshot().ServerID == ref.id })

@@ -42,7 +42,7 @@ func referenceArtworkProtocolClient(t *testing.T, channels ...ArtworkChannel) (*
 	return client, ref, connection
 }
 
-func TestReferenceInFlightArtworkCancellationReplacementAndRemoval(t *testing.T) {
+func TestE2EReferenceInFlightArtworkCancellationReplacementAndRemoval(t *testing.T) {
 	for _, mode := range []string{"cancel", "replace", "remove"} {
 		t.Run(mode, func(t *testing.T) {
 			client, ref, events := referenceMediaClient(t, Config{Roles: []Role{ArtworkRole}, Artwork: []ArtworkChannel{{Source: "album", Format: "png", Width: 512, Height: 512}}})
@@ -123,7 +123,7 @@ func TestReferenceInFlightArtworkCancellationReplacementAndRemoval(t *testing.T)
 	}
 }
 
-func TestReferenceMalformedArtworkWireClosesSilently(t *testing.T) {
+func TestE2EReferenceMalformedArtworkWireClosesSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		frames [][]byte
@@ -158,7 +158,7 @@ func TestReferenceMalformedArtworkWireClosesSilently(t *testing.T) {
 	}
 }
 
-func TestReferenceAllDisabledArtworkStreamStaysActiveWithoutImages(t *testing.T) {
+func TestE2EReferenceAllDisabledArtworkStreamStaysActiveWithoutImages(t *testing.T) {
 	client, ref, connection := referenceArtworkProtocolClient(t, ArtworkChannel{Source: "none"})
 	if _, ok := client.CurrentArtwork(0); ok || !slices.Contains(client.Snapshot().ActiveStreams, "artwork") {
 		t.Fatal("empty server channel array closed stream or invented an image")
@@ -167,7 +167,7 @@ func TestReferenceAllDisabledArtworkStreamStaysActiveWithoutImages(t *testing.T)
 	requireSilentProtocolClose(t, connection, ref)
 }
 
-func TestReferenceArtworkConfigurationMustMatchClientDeclaration(t *testing.T) {
+func TestE2EReferenceArtworkConfigurationMustMatchClientDeclaration(t *testing.T) {
 	for i, channels := range []any{
 		nil, []any{}, []any{nil},
 		[]any{map[string]any{"source": "album", "format": "jpeg", "width": 32, "height": 32}},

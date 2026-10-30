@@ -21,7 +21,7 @@ func corePeerEvents(t *testing.T, ref referenceServer, kind string) []map[string
 	return matches
 }
 
-func TestReferenceCoreClockAndLeaveDoNotRequireAPlayerRole(t *testing.T) {
+func TestE2EReferenceCoreClockAndLeaveDoNotRequireAPlayerRole(t *testing.T) {
 	for _, withController := range []bool{false, true} {
 		name := "no-active-roles"
 		roles := []Role{}
@@ -98,7 +98,7 @@ func TestReferenceCoreClockAndLeaveDoNotRequireAPlayerRole(t *testing.T) {
 	}
 }
 
-func TestReferenceMalformedCoreUpdatesCloseSilently(t *testing.T) {
+func TestE2EReferenceMalformedCoreUpdatesCloseSilently(t *testing.T) {
 	for _, test := range []struct {
 		name, kind string
 		payload    map[string]any
@@ -153,7 +153,7 @@ func TestReferenceMalformedCoreUpdatesCloseSilently(t *testing.T) {
 	}
 }
 
-func TestReferenceUnpairedUnpairDoesNotDeleteUnrelatedTrust(t *testing.T) {
+func TestE2EReferenceUnpairedUnpairDoesNotDeleteUnrelatedTrust(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)

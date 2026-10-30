@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/sendspin-player-go/audio/internal/audiotest"
 )
 
 type fakeDuplexOutput struct {
@@ -155,7 +156,7 @@ func TestDuplexArtifactsAreExclusiveAndContainerChecksReadNoSamples(t *testing.T
 	}
 	defer func() { _ = capture.Close(); _ = diagnostics.Close() }()
 	if runtime.GOOS != "windows" {
-		for _, p := range []string{dir, filepath.Join(dir, "capture.wav"), filepath.Join(dir, "arecord.log")} {
+		for _, p := range []string{dir, filepath.Join(dir, "capture.wav"), filepath.Join(dir, "capture.log")} {
 			stat, err := os.Stat(p)
 			if err != nil || stat.Mode().Perm()&0077 != 0 {
 				t.Fatal("private capture permissions", err)
@@ -200,5 +201,76 @@ func TestDuplexArtifactsAreExclusiveAndContainerChecksReadNoSamples(t *testing.T
 	}
 	if _, _, _, err = createDuplexArtifacts("relative"); err == nil {
 		t.Fatal("ambiguous artifact root accepted")
+	}
+}
+
+type fakeGoSDKInput struct {
+	device *fakeGoSDKCapture
+	err    error
+}
+
+func (i fakeGoSDKInput) Open(context.Context, audio.Format) (audio.InputDevice, error) {
+	return i.device, i.err
+}
+
+type fakeGoSDKCapture struct {
+	mode          string
+	reads, closes int
+}
+
+func (d *fakeGoSDKCapture) Read(ctx context.Context, dst []float32) (int, time.Time, error) {
+	d.reads++
+	switch d.mode {
+	case "odd":
+		return 1, time.Now(), nil
+	case "zero":
+		return 0, time.Time{}, nil
+	case "future":
+		return len(dst), time.Now().Add(time.Hour), nil
+	case "cancel":
+		<-ctx.Done()
+		return 0, time.Time{}, ctx.Err()
+	}
+	// Deliberately partial reads: counts are samples, not frames. The last
+	// destination must shrink to avoid overshooting the bounded capture.
+	return min(638, len(dst)), time.Now().Add(-time.Millisecond), nil
+}
+
+func (d *fakeGoSDKCapture) Close() error { d.closes++; return nil }
+
+func TestDuplexGoSDKInputCountsSamplesAndJoinsBeforeClose(t *testing.T) {
+	for _, mode := range []string{"normal", "odd", "zero", "future", "cancel", "partial-open"} {
+		t.Run(mode, func(t *testing.T) {
+			d := &fakeGoSDKCapture{mode: mode}
+			input := fakeGoSDKInput{device: d}
+			fault := errors.New("partial input open")
+			if mode == "partial-open" {
+				input.err = fault
+			}
+			r := audiotest.NewDuplexCapture(context.Background(), func() audio.Input { return input })
+			if err := r.Start(); mode == "partial-open" {
+				if !errors.Is(err, fault) || d.closes != 1 || d.reads != 0 {
+					t.Fatal("partial Open ownership lost", err, d.closes, d.reads)
+				}
+				return
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Stop()
+			if mode == "cancel" {
+				r.Stop()
+			}
+			err := r.Wait()
+			if mode == "normal" {
+				if err != nil || r.Samples() != 10*48000*2 {
+					t.Fatal("interleaved sample accounting failed", err, r.Samples())
+				}
+			} else if err == nil || r.Samples() != 0 {
+				t.Fatal("invalid capture credited", err, r.Samples())
+			}
+			if d.closes != 1 || !r.Opened() {
+				t.Fatal("reader/device not joined and closed")
+			}
+		})
 	}
 }

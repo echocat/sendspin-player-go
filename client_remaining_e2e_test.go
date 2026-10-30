@@ -17,7 +17,7 @@ import (
 	"github.com/echocat/sendspin-player-go/diagnostic"
 )
 
-func TestReferenceNondefaultSettingsSurviveFileStoreClientRestart(t *testing.T) {
+func TestE2EReferenceNondefaultSettingsSurviveFileStoreClientRestart(t *testing.T) {
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestReferenceNondefaultSettingsSurviveFileStoreClientRestart(t *testing.T) 
 	}
 }
 
-func TestReferencePairedUnpairAlsoWorksWithoutAnyApplicationRole(t *testing.T) {
+func TestE2EReferencePairedUnpairAlsoWorksWithoutAnyApplicationRole(t *testing.T) {
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestReferencePairedUnpairAlsoWorksWithoutAnyApplicationRole(t *testing.T) {
 	}
 }
 
-func TestReferenceValidUnavailableAudioIsDiscardedWithoutDisconnect(t *testing.T) {
+func TestE2EReferenceValidUnavailableAudioIsDiscardedWithoutDisconnect(t *testing.T) {
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestReferenceValidUnavailableAudioIsDiscardedWithoutDisconnect(t *testing.T
 	}
 }
 
-func TestReferenceSecondPairingAttemptIsAbortedClosedAndReleased(t *testing.T) {
+func TestE2EReferenceSecondPairingAttemptIsAbortedClosedAndReleased(t *testing.T) {
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestReferenceSecondPairingAttemptIsAbortedClosedAndReleased(t *testing.T) {
 	})
 }
 
-func TestReferenceSentinelCannotStartPairingPSK(t *testing.T) {
+func TestE2EReferenceSentinelCannotStartPairingPSK(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, false, nil)
 	eventually(t, func() bool { return client.Snapshot().ServerID == ref.id })
 	client.mu.Lock()
@@ -217,7 +217,7 @@ func TestReferenceSentinelCannotStartPairingPSK(t *testing.T) {
 	// category refusal/no reveal, not that the peer accepts our deliberate fault.
 }
 
-func TestReferenceCancellingActivationAfterDisclosureDoesNotPersistPSK(t *testing.T) {
+func TestE2EReferenceCancellingActivationAfterDisclosureDoesNotPersistPSK(t *testing.T) {
 	for _, playback := range []bool{false, true} {
 		name := "idle"
 		if playback {
@@ -265,7 +265,7 @@ func TestReferenceCancellingActivationAfterDisclosureDoesNotPersistPSK(t *testin
 	}
 }
 
-func TestReferenceDisplacedPreAttemptPairingSendsAbortAndCloses(t *testing.T) {
+func TestE2EReferenceDisplacedPreAttemptPairingSendsAbortAndCloses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cred, err := NewCredentials()

@@ -12,7 +12,14 @@ import (
 	"strings"
 )
 
-var backendHardwareTests = []string{"TestNativeLoopback", "TestReferenceServerPlaybackScenario", "TestReferenceServerNativeInputScenario"}
+var backendHardwareTests = []string{
+	"TestE2ENativeLoopback", "TestE2EReferenceServerPlaybackScenario", "TestE2EReferenceServerNativeInputScenario",
+	"TestE2EHardwareFullDuplexSilenceCapture", "TestE2EHardwareWeakReferencePlayback", "TestE2EHardwareSilenceLifecycle",
+}
+
+func hardwarePackage(suite, pkg string) bool {
+	return (suite == "desktop-audio-e2e" || suite == "alsa-e2e") && strings.HasSuffix(pkg, "/audio/native")
+}
 
 type EvidenceReport struct {
 	ID       string `json:"id"`
@@ -175,6 +182,12 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 			} else if !manifest.Complete || manifest.ExitCode != 0 || len(manifest.Commands) == 0 || manifest.Started.IsZero() || manifest.Finished.Before(manifest.Started) {
 				value.status = "fail"
 			}
+			if value.status == "stale" {
+				// Historical commands and source fingerprints describe the old
+				// checkout, not a failure or a pass of the renamed Go tests.
+				suites[manifest.Suite] = value
+				return nil
+			}
 			if err := p.validateCommands(manifest); err != nil {
 				value.status = "fail"
 			}
@@ -189,9 +202,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 					continue
 				}
 				var results []Result
-				if command.Kind == "harness" {
-					results, err = ReadHarnessResults(bytes.NewReader(data))
-				} else if command.Kind == "go" || command.Kind == "mdns" {
+				if command.Kind == "go" {
 					results, err = ReadGoResults(bytes.NewReader(data))
 				} else {
 					err = errors.New("unknown evidence command kind")
@@ -206,7 +217,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 					}
 					// Tagged backend suites may compile successfully on hosted CI
 					// while every hardware opt-in is skipped. Never call that a pass.
-					if (manifest.Suite == "desktop-audio-e2e" || manifest.Suite == "alsa-e2e") && slices.Contains(backendHardwareTests, result.Name) && result.Status == "skip" && value.status == "pass" {
+					if hardwarePackage(manifest.Suite, result.Package) && slices.Contains(backendHardwareTests, result.Name) && result.Status == "skip" && value.status == "pass" {
 						value.status = "skip"
 					}
 				}
@@ -214,7 +225,9 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 			}
 			if (manifest.Suite == "desktop-audio-e2e" || manifest.Suite == "alsa-e2e") && value.status == "pass" {
 				for _, name := range backendHardwareTests {
-					if !slices.ContainsFunc(value.results, func(r Result) bool { return r.Name == name && r.Status == "pass" }) {
+					if !slices.ContainsFunc(value.results, func(r Result) bool {
+						return hardwarePackage(manifest.Suite, r.Package) && r.Name == name && r.Status == "pass"
+					}) {
 						value.status = "not-run"
 					}
 				}
@@ -250,7 +263,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 		for _, id := range ids {
 			e := evidence[id]
 			entry := EvidenceReport{ID: id, Suite: e.Suite, Status: "not-run", Kind: e.Suite}
-			if test, ok := p.Inventory.Tests[id]; ok {
+			if test, ok := p.evidenceTest(e); ok {
 				entry.TestFile = test.File
 			}
 			if value, ok := suites[e.Suite]; ok {
@@ -258,7 +271,7 @@ func (p *Project) Report(options ReportOptions) (Report, error) {
 				if entry.Status == "pass" {
 					entry.Status = "not-run"
 					for _, result := range value.results {
-						if (e.Suite == "harness" && result.Name == e.Scenario) || (result.Package == e.Package && result.Name == e.Test) {
+						if result.Package == e.Package && result.Name == e.Test {
 							entry.Status = result.Status
 							break
 						}
@@ -503,11 +516,8 @@ func (p *Project) RenderAudit() ([]byte, error) {
 			var links []string
 			for _, id := range r.Evidence {
 				e := evidence[id]
-				if e.Suite == "harness" {
-					links = append(links, fmt.Sprintf("[harness:%s](conformance-testing.md)", e.Scenario))
-				} else {
-					links = append(links, fmt.Sprintf("[%s:%s](../%s)", e.Suite, e.Test, p.Inventory.Tests[id].File))
-				}
+				test, _ := p.evidenceTest(e)
+				links = append(links, fmt.Sprintf("[%s:%s](../%s)", e.Suite, e.Test, test.File))
 			}
 			linked := strings.Join(links, "<br>")
 			if linked == "" {
@@ -531,11 +541,8 @@ func (p *Project) RenderAudit() ([]byte, error) {
 			var links []string
 			for _, id := range o.Evidence {
 				e := evidence[id]
-				if e.Suite == "harness" {
-					links = append(links, fmt.Sprintf("[harness:%s](conformance-testing.md)", e.Scenario))
-				} else {
-					links = append(links, fmt.Sprintf("[%s:%s](../%s)", e.Suite, e.Test, p.Inventory.Tests[id].File))
-				}
+				test, _ := p.evidenceTest(e)
+				links = append(links, fmt.Sprintf("[%s:%s](../%s)", e.Suite, e.Test, test.File))
 			}
 			fmt.Fprintf(&table, "| %s / %s | %s | %s / %s | %s / %s | %s / %s / %s | %s / %d | %s — %s | %s |\n", o.ID, strings.Join(o.Groups, ", "), o.Citation, o.Actor, escape(o.Condition), o.Level, o.Basis, o.Scope, o.Assessment, o.Verification, o.Remaining, o.Priority, escape(o.Statement), escape(o.Notes), strings.Join(links, "<br>"))
 		}
@@ -572,7 +579,7 @@ func (p *Project) CheckGenerated() error {
 		return err
 	}
 	if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
-		return errors.New("generated rc1-audit.md is out of date: run mise run format:audit")
+		return errors.New("generated rc1-audit.md is out of date: regenerate it from rc1-audit.template.md and rc1-requirements.json")
 	}
 	return nil
 }

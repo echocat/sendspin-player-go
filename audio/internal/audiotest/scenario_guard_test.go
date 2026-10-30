@@ -1,5 +1,3 @@
-//go:build e2e
-
 package audiotest
 
 import (
@@ -7,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
 )
@@ -41,9 +40,12 @@ func TestScenarioGuardRejectsUnexpectedFramesBeforeForwarding(t *testing.T) {
 }
 
 type guardSink struct {
-	scenarioClockDevice
 	frames int
 }
+
+func (*guardSink) Next(ctx context.Context) (time.Time, error) { return time.Time{}, ctx.Err() }
+func (*guardSink) Flush(ctx context.Context) error             { return ctx.Err() }
+func (*guardSink) Close() error                                { return nil }
 
 func (s *guardSink) Write(_ context.Context, samples []float32) error {
 	s.frames += len(samples) / 2

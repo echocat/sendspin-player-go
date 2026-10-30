@@ -16,11 +16,13 @@ import (
 
 	sendspin "github.com/echocat/sendspin-player-go"
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/sendspin-player-go/internal/e2etest"
 )
 
 // SourceScenarioConfig binds every explicit start to the SAME explicitly
 // consented input device. It cannot select output, enable monitoring or fallback.
 type SourceScenarioConfig struct {
+	Suite        *e2etest.Suite
 	Prefix       string
 	InputFactory func(device string) audio.Input
 }
@@ -47,33 +49,17 @@ func RunReferenceServerNativeInputScenario(t *testing.T, config SourceScenarioCo
 
 // virtual is available only to package-internal fake-fixture tests. Native
 // backend entrypoints never substitute a fake, noop, output or monitor input.
-func runReferenceServerInputScenario(t *testing.T, config SourceScenarioConfig, virtual bool) {
+func runReferenceServerInputScenario(t *testing.T, config SourceScenarioConfig, virtual bool) *sourceReceipt {
 	t.Helper()
-	device := os.Getenv(config.Prefix + "_SOURCE_E2E_DEVICE")
-	if device == "" {
-		t.Skip(config.Prefix + "_SOURCE_E2E_DEVICE not set; no library, server or input opened")
+	device := "synthetic-input-not-hardware"
+	if !virtual {
+		device = CaptureDevice(t, config.Prefix)
 	}
-	if strings.ContainsRune(device, 0) {
-		t.Fatal("invalid explicit source input device")
+	if config.Suite == nil {
+		t.Fatal("source scenario requires an explicit package Suite")
 	}
-	setting := func(suffix string) string {
-		if value := os.Getenv(config.Prefix + "_SOURCE_E2E_" + suffix); value != "" {
-			return value
-		}
-		return os.Getenv(config.Prefix + "_E2E_" + suffix)
-	}
-	root, artifacts := setting("ROOT"), setting("ARTIFACT_DIR")
-	if !filepath.IsAbs(root) || !filepath.IsAbs(artifacts) {
-		t.Fatal("absolute repository root and private source artifact directory required")
-	}
-	if err := os.MkdirAll(artifacts, 0700); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(artifacts, "source-e2e-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	dir := privateDirectory(t)
+	ctx, cancel := context.WithTimeout(config.Suite.Context(), 60*time.Second)
 	defer cancel()
 	input := &sourceInputTap{factory: func() audio.Input { return config.InputFactory(device) }}
 	receipt := sourceReceipt{Schema: 1, Status: "fail", Server: "aiosendspin[server]==10.2.1", Virtual: virtual, Scope: "Explicit input -> Source-only encrypted localhost session -> independent PCM16 decoder; counts, format, ordering, stop/close and broad clock-domain sanity only. No output/monitoring, signal-content, physical stereo, calibrated ADC/DAC latency or synchronization claim. No samples/WAVs retained."}
@@ -100,7 +86,7 @@ func runReferenceServerInputScenario(t *testing.T, config SourceScenarioConfig, 
 		t.Fatal(err)
 	}
 	key := credentials.PairingPSK
-	ref := startScenarioReferenceWithOptions(t, ctx, root, dir, credentials, key, map[string]any{"observe_source": true})
+	ref := startScenarioReferenceWithOptions(t, config.Suite, credentials, key, map[string]any{"observe_source": true})
 	credentials.Records = []sendspin.PairingRecord{{ServerID: ref.id, PSK: key}}
 	store := &sendspin.MemoryStore{}
 	if err := store.Save(ctx, credentials); err != nil {
@@ -228,4 +214,5 @@ func runReferenceServerInputScenario(t *testing.T, config SourceScenarioConfig, 
 	receipt.DecodedFrames, receipt.Streams = frames, observed.Streams
 	completed = true
 	t.Log("Two explicitly started/stopped input streams decoded independently as 48kHz/2-channel PCM16. No output, samples/WAVs or signal-content/calibrated-latency claims.")
+	return &receipt
 }

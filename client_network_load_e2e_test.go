@@ -22,7 +22,7 @@ import (
 
 // These are real encrypted loopback sessions through a bounded userspace TCP
 // proxy, not a LAN simulation, TCP packet-loss model or physical output proof.
-func TestReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
+func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 	for _, inbound := range []bool{false, true} {
 		for _, suite := range []string{"25519_ChaChaPoly_SHA256", "25519_AESGCM_SHA256"} {
 			for i, codecName := range []string{"pcm", "flac", "opus"} {

@@ -71,15 +71,11 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		args = append(args, "./...")
 		return goTest(".", args...), nil
 	case "e2e":
-		// Each platform starts many independent Python peers serially. The
-		// first real CI run made continuous successful progress for five
-		// minutes on Windows/macOS before the aggregate test budget expired.
-		// This changes only the suite budget, never protocol/peer deadlines.
-		// The transport campaign adds twelve paced/reconnection scenarios;
-		// increase only the aggregate suite budget, never per-peer deadlines.
-		return goTest(".", "-race", "-tags=e2e", "-timeout=15m", "."), nil
+		// Package TestMain fixtures own the pinned workers. This optional
+		// recorder changes only the aggregate budget, not peer deadlines.
+		return goTest(".", "-race", "-tags=e2e", "-run=^TestE2E", "-timeout=15m", "./..."), nil
 	case "reference":
-		return goTest(".", "-race", "-tags=timefilter_reference", "-timeout=2m", "./internal/timesync"), nil
+		return goTest(".", "-race", "-tags=e2e", "-run=^TestE2ECPPReference$", "-timeout=2m", "./internal/timesync"), nil
 	case "examples":
 		calls := append(goTest("_examples/player", "./..."), goTest("_examples/external-control", "./...")...)
 		for i := range calls {
@@ -97,13 +93,15 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 		}
 		return calls, nil
 	case "desktop-audio-e2e", "alsa-e2e":
-		calls := goTest(".", "-tags=e2e", "-timeout=5m", "./audio/internal/...", "./audio/pipewire/...", "./audio/coreaudio/...", "./audio/wasapi/...")
+		calls := goTest(".", "-tags=e2e", "-run=^TestE2E", "-timeout=5m", "./audio/native/...", "./audio/pipewire/...", "./audio/internal/...")
 		if suite == "alsa-e2e" {
-			calls = goTest("audio/alsa", "-tags=e2e", "-timeout=5m", "./...")
+			// Compatibility alias only: hardware wrappers now live once in
+			// audio/native, independent of the backend selected by the device.
+			calls = goTest(".", "-tags=e2e", "-run=^TestE2E", "-timeout=5m", "./audio/native/...")
 		}
 		for i := range calls {
-			// Software-only scenarios have separate explicit tasks/entrypoints;
-			// never allow an inherited virtual flag to masquerade as native E2E.
+			// Private PipeWire is software-only; it never satisfies native
+			// hardware requirements. Do not inherit virtual hardware consent.
 			calls[i].env = []string{"CGO_ENABLED=0", "SENDSPIN_ALSA_E2E_VIRTUAL=", "SENDSPIN_PIPEWIRE_E2E_VIRTUAL=", "SENDSPIN_COREAUDIO_E2E_VIRTUAL=", "SENDSPIN_WASAPI_E2E_VIRTUAL=", "SENDSPIN_AUDIOTEST_E2E_VIRTUAL=", "SENDSPIN_AUDIOTEST_SOURCE_E2E_FAKE="}
 		}
 		return calls, nil
@@ -123,28 +121,22 @@ func (p *Project) invocations(suite string, coverage bool) ([]invocation, error)
 			return nil, errors.New("empty fuzz inventory")
 		}
 		return calls, nil
-	case "mdns", "mdns-docker":
-		args := []string{"run", "./internal/mdnstestcmd"}
-		if suite == "mdns-docker" {
-			args = append(args, "--engine", "docker")
-		}
-		return []invocation{{dir: ".", kind: "mdns", args: args}}, nil
+	case "mdns":
+		return goTest(".", "-race", "-tags=e2e", "-run=^TestE2EMDNS", "-timeout=5m", "./internal/mdnstest"), nil
 	case "harness":
-		return []invocation{{dir: ".", kind: "harness", args: []string{"run", "./internal/conformancetestcmd"}}}, nil
+		return goTest(".", "-race", "-tags=e2e", "-run=^TestE2EOfficial", "-timeout=15m", "./internal/conformancetest"), nil
 	}
 	return nil, fmt.Errorf("unknown evidence suite %q", suite)
 }
 
-// Run records the latest explicit invocation per suite/platform/toolchain. It
+// Run optionally records explicit Go test invocations per suite/platform/toolchain.
+// Ordinary Go tests and task entrypoints do not require this audit recorder. It
 // publishes an incomplete manifest BEFORE running, so a killed run cannot reuse
 // a previous pass. Logs remain in unique subdirectories for diagnosis.
 func (p *Project) Run(parent context.Context, suite string, coverage bool) error {
 	calls, err := p.invocations(suite, coverage)
 	if err != nil {
 		return err
-	}
-	if suite == "mdns-docker" {
-		suite = "mdns"
 	}
 	if err = devpath.Prepare(p.Root); err != nil {
 		return err
@@ -214,27 +206,18 @@ func (p *Project) Run(parent context.Context, suite string, coverage bool) error
 
 func (p *Project) execute(ctx context.Context, directory string, index int, call invocation) (Command, error) {
 	logName := fmt.Sprintf("command-%02d.jsonl", index)
-	if call.kind != "go" {
-		logName = fmt.Sprintf("command-%02d.log", index)
-	}
 	log, err := os.Create(filepath.Join(directory, logName))
 	if err != nil {
 		return Command{}, err
 	}
 	args := slices.Clone(call.args)
-	if call.kind == "harness" {
-		args = append(args, "--manifest", filepath.Join(directory, "harness.json"))
-	}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = filepath.Join(p.Root, filepath.FromSlash(call.dir))
 	cmd.Env = append(os.Environ(), executionEnv(call)...)
 	cmd.Stdout = log
-	cmd.Stderr = io.MultiWriter(os.Stderr, log)
 	// go test writes non-JSON compiler diagnostics to stderr. Keep these out of
 	// its event stream; a nonzero command exit is authoritative either way.
-	if call.kind == "go" {
-		cmd.Stderr = os.Stderr
-	}
+	cmd.Stderr = os.Stderr
 	fmt.Fprintf(os.Stderr, "[audit] %s: go %s\n", call.dir, strings.Join(args, " "))
 	// Do not label a prebuilt runner's results with its own version when PATH,
 	// GOTOOLCHAIN or a nested module would actually select another Go context.
@@ -247,38 +230,13 @@ func (p *Project) execute(ctx context.Context, directory string, index int, call
 	if err != nil {
 		entry.ExitCode = 1
 	}
-	if call.kind == "harness" {
-		entry.Log = "harness.json"
-	}
-	if call.kind == "mdns" && err == nil {
-		entry.Log = "mdns.jsonl"
-		input, openErr := os.Open(filepath.Join(p.Root, "var", "mdns", "tests.log"))
-		if openErr != nil {
-			return entry, openErr
-		}
-		defer func() { _ = input.Close() }()
-		output, createErr := os.Create(filepath.Join(directory, entry.Log))
-		if createErr != nil {
-			return entry, createErr
-		}
-		convert := exec.CommandContext(ctx, "go", "tool", "test2json", "-p", "github.com/echocat/sendspin-player-go")
-		convert.Stdin = input
-		convert.Stdout = output
-		convert.Stderr = os.Stderr
-		err = convert.Run()
-		closeErr = errors.Join(closeErr, output.Close())
-	}
 	data, readErr := os.ReadFile(filepath.Join(directory, entry.Log))
 	if readErr == nil {
 		entry.SHA256 = digest(data)
 	}
 	if err == nil && closeErr == nil && readErr == nil {
 		var results []Result
-		if call.kind == "harness" {
-			results, err = ReadHarnessResults(strings.NewReader(string(data)))
-		} else {
-			results, err = ReadGoResults(strings.NewReader(string(data)))
-		}
+		results, err = ReadGoResults(strings.NewReader(string(data)))
 		if err == nil && len(results) == 0 {
 			err = errors.New("command produced no test evidence")
 		}
@@ -338,9 +296,9 @@ func suiteScope(suite string) string {
 	case "unit":
 		return "Host Go unit/integration tests; fake audio, not physical output"
 	case "e2e":
-		return "Independent loopback reference; real protocol, simulated audio output"
+		return "Tagged Go E2E tests across root-module packages; independent peers/oracles and packaging workflows; physical audio consent remains separate"
 	case "mdns":
-		return "Real IPv4 multicast in isolated Linux container; not native host-network validation"
+		return "Isolated multicast DNS-SD and encrypted sessions observed by a Go peer; not Python zeroconf interoperability or universal native host-network validation"
 	case "harness":
 		return "15 selected official loopback scenarios; simulated audio sink"
 	case "reference":
@@ -352,7 +310,7 @@ func suiteScope(suite string) string {
 	case "desktop-audio":
 		return "CGO-free host PipeWire/WASAPI/CoreAudio load-failure, clock/callback ABI and fake queue/lifecycle tests; no audio device or server connection, capture or physical measurement"
 	case "desktop-audio-e2e", "alsa-e2e":
-		return "Platform-tagged explicit output, marker loopback and Source/input E2E opt-ins; absent device consent is a visible skip, never hardware evidence; fake/virtual fixtures are separate software-only coverage"
+		return "Generic audio/native output, marker loopback and Source/input opt-ins; absent device consent is a visible skip, never hardware evidence; private PipeWire fixtures are software-only and cannot satisfy native hardware requirements"
 	case "examples":
 		return "CGO-free independent player and external-control example module tests; no audio device, capture or physical measurement"
 	}
@@ -371,11 +329,7 @@ func (p *Project) validateCommands(manifest Manifest) error {
 			}
 		}
 	}
-	suite := manifest.Suite
-	if suite == "mdns" && len(manifest.Commands) == 1 && slices.Contains(manifest.Commands[0].Args, "docker") {
-		suite = "mdns-docker"
-	}
-	want, err := p.invocations(suite, coverage)
+	want, err := p.invocations(manifest.Suite, coverage)
 	if err != nil {
 		return err
 	}
@@ -385,12 +339,6 @@ func (p *Project) validateCommands(manifest Manifest) error {
 	for i, call := range want {
 		got := manifest.Commands[i]
 		args := slices.Clone(got.Args)
-		if call.kind == "harness" {
-			if len(args) < 2 || args[len(args)-2] != "--manifest" || filepath.Base(strings.ReplaceAll(args[len(args)-1], "\\", "/")) != "harness.json" {
-				return errors.New("harness has no explicit result sidecar")
-			}
-			args = args[:len(args)-2]
-		}
 		for j, arg := range args {
 			if strings.HasPrefix(arg, "-coverprofile=") {
 				args[j] = "-coverprofile=<artifact>"

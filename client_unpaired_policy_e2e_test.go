@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestReferenceUnpairedPolicyIsAdvertisedAndNotRemotelyMutable(t *testing.T) {
+func TestE2EReferenceUnpairedPolicyIsAdvertisedAndNotRemotelyMutable(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		name := "disabled"
 		if enabled {
@@ -65,7 +65,9 @@ func TestReferenceUnpairedPolicyIsAdvertisedAndNotRemotelyMutable(t *testing.T) 
 				if !errors.As(connection.err, &goodbye) || goodbye.Reason != "pairing_required" {
 					t.Fatal("local policy denial used the wrong response", connection.err)
 				}
-				eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "pairing_required") == 1 })
+				eventually(t, func() bool {
+					return referenceGoodbyeObserved(t, ref, "pairing_required") && referenceEventCount(t, ref, "disconnected", "") == 1
+				})
 			}
 			stored, err := store.Load(context.Background())
 			if err != nil {

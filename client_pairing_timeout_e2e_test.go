@@ -12,12 +12,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/echocat/sendspin-player-go/diagnostic"
+	"github.com/echocat/sendspin-player-go/internal/monotime"
 	"github.com/echocat/sendspin-player-go/internal/protocol"
 	"github.com/echocat/sendspin-player-go/internal/wire"
 	"github.com/flynn/noise"
 )
 
-func TestReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
+func TestE2EReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +84,7 @@ func TestReferencePairingDeadlineStopsFinalizeAfterFirstWrite(t *testing.T) {
 	requirePairInitIndex(t, reference, 1, 2)
 }
 
-func TestReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
+func TestE2EReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +145,21 @@ func TestReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
 		if s.pendingPSK == nil || !s.pairingAttempt {
 			t.Fatal("native attempt never reached finalize")
 		}
-		s.pairingDeadline = time.Now().Add(-time.Nanosecond)
+		// The dispatcher uses the SDK clock (QPC on Windows), but the Store's
+		// context uses the Go runtime clock. A runtime-only "now - 1ns" can
+		// expire that context before the SDK gate considers the attempt expired.
+		// Place this test input before BOTH clocks, without assuming their skew.
+		expiredAt := monotime.Now()
+		if runtimeNow := time.Now(); runtimeNow.Before(expiredAt) {
+			expiredAt = runtimeNow
+		}
+		s.pairingDeadline = expiredAt.Add(-time.Nanosecond)
+		storeCtx, stopStore := context.WithDeadline(ctx, s.pairingDeadline)
+		storeErr := storeCtx.Err()
+		stopStore()
+		if monotime.Now().Before(s.pairingDeadline) || storeErr != context.DeadlineExceeded || ctx.Err() != nil {
+			t.Fatal("fixture deadline must already be expired in both SDK and Store clocks", storeErr, ctx.Err())
+		}
 		if err = s.dispatch(frame); err != nil {
 			t.Fatal("timeout closed instead of aborting the attempt", err)
 		}
@@ -164,7 +179,7 @@ func TestReferenceExpiredPairingFinalizeCannotBeatTheActorTimer(t *testing.T) {
 	// that late key nor delete unrelated records; later repair uses Sentinel.
 }
 
-func TestReferencePairingStoreDeadlineAbortsWithoutActorTimer(t *testing.T) {
+func TestE2EReferencePairingStoreDeadlineAbortsWithoutActorTimer(t *testing.T) {
 	credentials, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)

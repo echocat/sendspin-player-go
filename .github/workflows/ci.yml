@@ -4,12 +4,6 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      scope:
-        description: Full validation or native desktop diagnostics only (not full CI)
-        type: choice
-        default: full
-        options: [full, native-desktop]
 permissions:
   contents: read
 concurrency:
@@ -17,93 +11,75 @@ concurrency:
   cancel-in-progress: true
 jobs:
   go:
-    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        go: ['1.27.3', 'stable']
+        go:
+          - version: '1.27.3'
+            mise-env: ci-minimum
+          - version: stable
+            mise-env: ci-stable
     runs-on: ${{ matrix.os }}
     env:
-      SENDSPIN_EVIDENCE_VARIANT: ${{ matrix.go == 'stable' && 'stable' || 'default' }}
+      MISE_ENV: ${{ matrix.go.mise-env }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ matrix.go }}
-      - name: Prepare coverage output
-        run: |
-            mkdir -p var/coverage
-        shell: bash
-      - run: go run ./internal/specauditcmd run --suite unit --coverage
-      - run: go mod tidy -diff
-      - name: Record CGO-free example tests
-        run: go run ./internal/specauditcmd run --suite examples
-      - name: Build offline WAV analysis tool without CGO or audio libraries
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - name: Ordinary Go tests, with race detection and coverage
+        run: mise run test --race --coverage -- -json
+      - name: Ordinary Go tests without CGO
         env:
           CGO_ENABLED: '0'
-        run: go build -o "var/bin/loopback/loopback$(go env GOEXE)" ./internal/loopbackcmd
-        shell: bash
-      - name: Test ALSA purego ABI/null PCM or platform stub without hardware
-        env:
-          CGO_ENABLED: '0'
-        run: go test -count=1 ./audio/alsa
-      - name: Test native selector without CGO or hardware
-        env:
-          CGO_ENABLED: '0'
-        run: go test -count=1 ./audio/native
-      - name: Build the native player without CGO or a C compiler
-        working-directory: _examples/player
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          go build -o ../../var/bin/native/ .
+        run: mise run test
+      - run: mise run lint:go:mod
+      - name: Build the offline WAV tool without CGO
+        run: mise run build:loopback
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: spec-evidence-go-${{ matrix.os }}-${{ matrix.go }}-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
+          name: go-coverage-${{ matrix.os }}-${{ matrix.go.version }}
+          path: profile.cov
           if-no-files-found: warn
   e2e:
-    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      SENDSPIN_TEST_PLAYBACK_DEVICE: ''
+      SENDSPIN_TEST_CAPTURE_DEVICE: ''
+      SENDSPIN_REFERENCE_UBSAN: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: mise run test:e2e
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-e2e-${{ matrix.os }}-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: resource-soak-${{ matrix.os }}-attempt-${{ github.run_attempt }}
-          path: var/soak
-          if-no-files-found: warn
-  quality:
-    if: inputs.scope != 'native-desktop'
-    runs-on: ubuntu-latest
+      - name: Install optional Linux native runtime libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
+      - name: E2E Go tests (TestMain owns fixtures; no physical devices)
+        run: mise run test:e2e -- -json
+  desktop-audio:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+      SENDSPIN_TEST_PLAYBACK_DEVICE: ''
+      SENDSPIN_TEST_CAPTURE_DEVICE: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: mise run vuln
-      - run: mise run audit:verify-cpace
-      - run: mise run test:fuzz
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-fuzz-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
-          if-no-files-found: warn
+      - name: Install optional Linux native runtime libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
+      - name: Native ABI and fake-device unit tests
+        run: mise run test:native
+      - name: Native backend E2E architecture checks (physical devices visibly skipped)
+        run: mise run test:native:e2e -- -json
   lint:
-    if: inputs.scope != 'native-desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -113,173 +89,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - run: mise run lint
-      - name: Validate file-task discovery and fake shell orchestration
-        if: runner.os == 'Linux'
-        run: mise run test:tasks
-  mdns:
-    if: inputs.scope != 'native-desktop'
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: mise run test:mdns:docker
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-mdns-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
-          if-no-files-found: warn
-  conformance:
-    if: inputs.scope != 'native-desktop'
+      - name: Reachable dependency vulnerabilities and bounded Go fuzz tests
+        run: >-
+          mise run vuln ::: test:fuzz
+  source-pins:
+    name: Pinned sources (not conformance certification)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: mise run test:conformance
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-harness-attempt-${{ github.run_attempt }}
-          path: |
-            var/audit/evidence
-            var/conformance
-          if-no-files-found: warn
-  time-filter-reference:
-    if: inputs.scope != 'native-desktop'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      SENDSPIN_REFERENCE_UBSAN: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: '1.27.3'
-      - run: go run ./internal/specauditcmd run --suite reference
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-reference-${{ matrix.os }}-attempt-${{ github.run_attempt }}
-          path: var/audit/evidence
-          if-no-files-found: warn
-  native-build:
-    if: inputs.scope != 'native-desktop'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: mise run lint:native
-      - run: mise run build:example
-  alsa:
-    if: inputs.scope != 'native-desktop'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2t64
-      - run: mise run lint:alsa
-      - run: mise run test:alsa
-      - name: Tagged output and Source/input tests (visible SKIP without device ENV)
-        run: mise run test:alsa:e2e:optin
-      - name: Independent-server software scenario (virtual output, not native evidence)
-        run: mise run test:alsa:e2e:virtual
-      - run: go run ./internal/specauditcmd report --profile alsa --output var/audit/alsa
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-alsa-attempt-${{ github.run_attempt }}
-          path: |
-            var/audit/evidence
-            var/audit/alsa
-          if-no-files-found: warn
-  desktop-audio:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
-      - run: mise run lint:desktop-audio
-      - run: mise run test:desktop-audio
-      - name: Tagged output, marker loopback and Source/input (visible SKIP without device ENV)
-        run: mise run test:desktop-audio:e2e
-      - if: matrix.os == 'ubuntu-latest'
-        name: Source helper with fake input (software only, not native capture evidence)
-        run: mise run test:desktop-audio:source:fake
-      - if: runner.os == 'Linux'
-        run: mise run test:pipewire:isolated
-      - if: runner.os == 'Linux'
-        name: Independent server through private PipeWire graph (software integration only)
-        run: mise run test:pipewire:e2e:isolated
-      - run: go run ./internal/specauditcmd report --profile desktop-audio --output var/audit/desktop-audio
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: spec-evidence-desktop-audio-${{ matrix.os }}-attempt-${{ github.run_attempt }}
-          path: |
-            var/audit/evidence
-            var/audit/desktop-audio
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && runner.os == 'Linux'
-        with:
-          name: native-desktop-private-pipewire-${{ matrix.os }}-attempt-${{ github.run_attempt }}
-          path: var/platform-validation/native-desktop/pipewire
-          if-no-files-found: warn
-  spec-report:
-    name: RC1 traceability (not certification)
-    if: always() && inputs.scope != 'native-desktop'
-    needs: [go, e2e, quality, lint, mdns, conformance, time-filter-reference, native-build, alsa, desktop-audio]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: spec-evidence-*-attempt-${{ github.run_attempt }}
-          path: var/audit/ci
-      - name: Validate catalog and pinned upstream source fingerprints
-        if: always()
-        run: |
-          mise run lint:audit
-          mise run audit:verify-spec
-          mise run audit:verify-noise
-          mise run audit:verify-mdns
-      - name: Generate and gate the pinned Linux software-evidence report
-        if: always()
-        run: go run ./internal/specauditcmd report --profile full --evidence var/audit/ci --goos linux --goarch amd64 --go-version go1.27.3
-      - name: Generate and gate native build/callback evidence (not physical measurements)
-        if: always()
-        run: go run ./internal/specauditcmd report --profile native --evidence var/audit/ci --output var/audit/native --goos linux --goarch amd64 --go-version go1.27.3
-      - name: Gate separate Linux ALSA purego ABI/null-PCM evidence (no physical measurements)
-        if: always()
-        run: go run ./internal/specauditcmd report --profile alsa --evidence var/audit/ci --output var/audit/alsa --goos linux --goarch amd64 --go-version go1.27.3
-      - name: Gate separate direct desktop clock/callback evidence (no physical measurements)
-        if: always()
-        run: go run ./internal/specauditcmd report --profile desktop-audio --evidence var/audit/ci --output var/audit/desktop-audio --goos linux --goarch amd64 --go-version go1.27.3
-      - name: Publish traceability summary
-        if: always()
-        shell: bash
-        run: |
-          if [ -f var/audit/summary.md ]; then
-            cat var/audit/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: rc1-traceability-report-attempt-${{ github.run_attempt }}
-          path: |
-            var/audit/report.json
-            var/audit/report.md
-            var/audit/summary.md
-            var/audit/native
-            var/audit/alsa
-            var/audit/desktop-audio
-          if-no-files-found: warn
+      - run: >-
+          mise run lint:audit ::: audit:verify-spec ::: audit:verify-noise ::: audit:verify-mdns

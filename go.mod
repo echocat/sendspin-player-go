@@ -28,6 +28,5 @@ ignore (
 	LICENSES
 	_examples
 	docs
-	mise-tasks
 	var
 )

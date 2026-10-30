@@ -98,13 +98,13 @@ func requireSilentProtocolClose(t *testing.T, connection *outboundTestConnection
 	eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "") > 0 })
 	for _, raw := range ref.control(t, map[string]any{"command": "status"})["events"].([]any) {
 		event := raw.(map[string]any)
-		if event["type"] == "disconnected" && event["reason"] != nil {
+		if event["type"] == "wire_goodbye" || (event["type"] == "disconnected" && event["reason"] != nil) {
 			t.Fatal("silent failure sent an application goodbye", event)
 		}
 	}
 }
 
-func TestReferenceIgnoresInactivePairingField(t *testing.T) {
+func TestE2EReferenceIgnoresInactivePairingField(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, false, nil)
 	eventually(t, func() bool { return client.Snapshot().ServerID == ref.id })
 	for _, value := range []any{nil, false, 42, "unused", []any{}, map[string]any{"method": nil, "format": false}} {
@@ -114,7 +114,7 @@ func TestReferenceIgnoresInactivePairingField(t *testing.T) {
 	noPairingRecordOrReveal(t, store, ref)
 }
 
-func TestReferenceMalformedPairingActivationClosesSilently(t *testing.T) {
+func TestE2EReferenceMalformedPairingActivationClosesSilently(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		payload map[string]any
@@ -142,7 +142,7 @@ func TestReferenceMalformedPairingActivationClosesSilently(t *testing.T) {
 	}
 }
 
-func TestReferencePairingAbortDiscardStopsAtNextActivation(t *testing.T) {
+func TestE2EReferencePairingAbortDiscardStopsAtNextActivation(t *testing.T) {
 	client, ref, store, connection := pairingFieldClient(t, true, map[string]any{
 		"initial_activation": map[string]any{"activities": []string{"pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "dynamic_pairing_code", "format": "digits"}},
 		"pairing_stale_messages": []any{
@@ -158,7 +158,7 @@ func TestReferencePairingAbortDiscardStopsAtNextActivation(t *testing.T) {
 	requireSilentProtocolClose(t, connection, ref)
 }
 
-func TestReferenceUnsupportedFirstPairingActivationCanRecover(t *testing.T) {
+func TestE2EReferenceUnsupportedFirstPairingActivationCanRecover(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, true, map[string]any{"initial_activation": map[string]any{"activities": []string{"pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "dynamic_pairing_code", "format": "digits"}}})
 	eventually(t, func() bool { return referenceEventCount(t, ref, "pair_abort", "method_not_supported") == 1 })
 	noPairingRecordOrReveal(t, store, ref)
@@ -182,7 +182,7 @@ func TestReferenceUnsupportedFirstPairingActivationCanRecover(t *testing.T) {
 	requirePairInitIndex(t, ref, 2)
 }
 
-func TestReferenceUnsupportedRehandshakeActivationCanRecover(t *testing.T) {
+func TestE2EReferenceUnsupportedRehandshakeActivationCanRecover(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, false, map[string]any{"pairing_activation": map[string]any{"activities": []string{"pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "pairing_psk", "format": "digits"}}})
 	eventually(t, func() bool { return client.Snapshot().ServerID == ref.id })
 	result := ref.control(t, map[string]any{"command": "pair"})
@@ -203,7 +203,7 @@ func TestReferenceUnsupportedRehandshakeActivationCanRecover(t *testing.T) {
 	requirePairInitIndex(t, ref, 2)
 }
 
-func TestReferencePSKPairingRejectsAnEmissionFormat(t *testing.T) {
+func TestE2EReferencePSKPairingRejectsAnEmissionFormat(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, true, map[string]any{"initial_activation": map[string]any{"activities": []string{"pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "pairing_psk", "format": "digits"}}})
 	eventually(t, func() bool { return referenceEventCount(t, ref, "pair_abort", "method_not_supported") == 1 })
 	noPairingRecordOrReveal(t, store, ref)
@@ -211,7 +211,7 @@ func TestReferencePSKPairingRejectsAnEmissionFormat(t *testing.T) {
 	pairingFixtureBarrier(t, client, ref, "psk-format-rejected")
 }
 
-func TestReferencePSKPairingIgnoresUnknownParameterFields(t *testing.T) {
+func TestE2EReferencePSKPairingIgnoresUnknownParameterFields(t *testing.T) {
 	client, ref, store, _ := pairingFieldClient(t, true, map[string]any{"initial_activation": map[string]any{"activities": []string{"pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "pairing_psk", "future_info": nil, "FORMAT": false}}})
 	eventually(t, func() bool { return client.Snapshot().Available })
 	cred, err := store.Load(context.Background())
@@ -237,7 +237,7 @@ func TestReferencePSKPairingIgnoresUnknownParameterFields(t *testing.T) {
 	requirePairInitIndex(t, ref, 1, 1)
 }
 
-func TestReferenceUnauthorizedPrecedesUnsupportedPairing(t *testing.T) {
+func TestE2EReferenceUnauthorizedPrecedesUnsupportedPairing(t *testing.T) {
 	_, ref, store, connection := pairingFieldClient(t, false, map[string]any{"initial_activation": map[string]any{"activities": []string{"playback", "pairing"}, "active_roles": []string{}, "pairing": map[string]any{"method": "dynamic_pairing_code", "format": "digits"}}})
 	select {
 	case <-connection.done:
@@ -248,14 +248,16 @@ func TestReferenceUnauthorizedPrecedesUnsupportedPairing(t *testing.T) {
 	if !errors.As(connection.err, &goodbye) || goodbye.Reason != "unauthorized" {
 		t.Fatal("wrong refusal priority", connection.err)
 	}
-	eventually(t, func() bool { return referenceEventCount(t, ref, "disconnected", "unauthorized") == 1 })
+	eventually(t, func() bool {
+		return referenceGoodbyeObserved(t, ref, "unauthorized") && referenceEventCount(t, ref, "disconnected", "") == 1
+	})
 	if referenceEventCount(t, ref, "pair_abort", "") != 0 {
 		t.Fatal("sent pairing abort before required goodbye")
 	}
 	noPairingRecordOrReveal(t, store, ref)
 }
 
-func TestReferencePSKPairingRejectsCodeMessagesMidAttempt(t *testing.T) {
+func TestE2EReferencePSKPairingRejectsCodeMessagesMidAttempt(t *testing.T) {
 	for _, kind := range []string{"server/pair-init", "server/pair-auth", "server/pair-confirm"} {
 		t.Run(kind, func(t *testing.T) {
 			client, ref, store, connection := pairingFieldClient(t, true, map[string]any{"hold_pairing": true})
@@ -291,7 +293,7 @@ func TestReferencePSKPairingRejectsCodeMessagesMidAttempt(t *testing.T) {
 	}
 }
 
-func TestReferenceDisplacementSurvivesRejectedRehandshakeActivation(t *testing.T) {
+func TestE2EReferenceDisplacementSurvivesRejectedRehandshakeActivation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cred, err := NewCredentials()
@@ -402,7 +404,10 @@ func TestReferenceDisplacementSurvivesRejectedRehandshakeActivation(t *testing.T
 	// finishing the handoff must not depend on the old server sending one.
 	eventually(t, func() bool { return client.Snapshot().ServerID == b.id && client.Snapshot().Available })
 	a.control(t, map[string]any{"command": "release_activation"})
-	eventually(t, func() bool { return referenceEventCount(t, a, "disconnected", "another_server") == 1 })
+	eventually(t, func() bool {
+		return referenceGoodbyeObserved(t, a, "another_server") && referenceEventCount(t, a, "disconnected", "") > 0
+	})
+	a.control(t, map[string]any{"command": "disconnect", "url": endpoint})
 	if referenceEventCount(t, a, "pair_abort", "method_not_supported") != 1 || referenceEventCount(t, a, "pair_finalize", "") != 0 {
 		t.Fatal("displaced unsupported attempt was started instead of refused")
 	}

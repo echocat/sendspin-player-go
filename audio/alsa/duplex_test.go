@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/sendspin-player-go/audio/internal/audiotest"
 )
 
 // All capture orchestration is test-only. Neither importing the SDK/backend nor
-// ordinary tests can start arecord. The live entry point is separately gated.
+// ordinary tests can start native capture. The live entry point is separately gated.
 type duplexRecorder interface {
 	Start() error
 	Wait() error
@@ -34,83 +35,20 @@ type duplexResult struct {
 	CaptureFrames       int64  `json:"capture_frames"`
 	CaptureBytes        int64  `json:"capture_file_bytes"`
 	PhysicalConformance bool   `json:"physical_conformance"`
-	CaptureOpened       bool   `json:"capture_process_started"`
+	CaptureOpened       bool   `json:"capture_opened"`
 	Status              string `json:"status"`
 	Error               string `json:"error,omitempty"`
 }
 
 func duplexLoop(ctx context.Context, open func(context.Context, audio.Format) (audio.Device, error), recorder duplexRecorder) (frames int64, info Info, err error) {
-	work, cancel := context.WithCancel(ctx)
-	defer cancel()
-	if err = work.Err(); err != nil {
-		return 0, info, err
-	}
-	d, err := open(work, audio.Format{SampleRate: 48000, Channels: 2})
-	if err != nil {
-		return 0, info, err
-	}
-	defer func() { err = errors.Join(err, d.Close()) }()
-	if native, ok := d.(Device); ok {
-		info = native.Info()
-	}
-	if _, err = d.Next(work); err != nil {
-		return 0, info, err
-	}
-	writerCtx, stopWriter := context.WithCancel(work)
-	defer stopWriter()
-	type written struct {
-		frames int64
-		err    error
-	}
-	writes := make(chan written, 1)
-	go func() {
-		var total int64
-		var writeErr error
-		defer func() { writes <- written{total, writeErr} }()
-		zeros := make([]float32, 960) // 10ms at 48kHz/stereo; never nonzero media.
-		for {
-			if writeErr = writerCtx.Err(); writeErr != nil {
-				return
-			}
-			if _, writeErr = d.Next(writerCtx); writeErr != nil {
-				return
-			}
-			if writeErr = d.Write(writerCtx, zeros); writeErr != nil {
-				return
-			}
-			total += 480
+	frames, err = audiotest.DuplexLoop(ctx, func(ctx context.Context, format audio.Format) (audio.Device, error) {
+		d, err := open(ctx, format)
+		if native, ok := d.(Device); ok {
+			info = native.Info()
 		}
-	}()
-	if err = recorder.Start(); err != nil {
-		stopWriter()
-		w := <-writes
-		return w.frames, info, err
-	}
-	defer recorder.Stop()
-	recorded := make(chan error, 1)
-	go func() { recorded <- recorder.Wait() }()
-	var w written
-	select {
-	case err = <-recorded:
-		stopWriter()
-		w = <-writes
-		if w.err != nil && !errors.Is(w.err, context.Canceled) {
-			err = errors.Join(err, w.err)
-		}
-	case w = <-writes:
-		err = w.err
-		recorder.Stop()
-		cancel()
-		err = errors.Join(err, <-recorded)
-	case <-ctx.Done():
-		err = ctx.Err()
-		recorder.Stop()
-		cancel()
-		stopWriter()
-		w = <-writes
-		err = errors.Join(err, <-recorded)
-	}
-	return w.frames, info, err
+		return d, err
+	}, recorder)
+	return frames, info, err
 }
 
 func createDuplexArtifacts(root string) (dir string, capture, diagnostics *os.File, err error) {
@@ -128,7 +66,7 @@ func createDuplexArtifacts(root string) (dir string, capture, diagnostics *os.Fi
 	if err != nil {
 		return dir, nil, nil, err
 	}
-	diagnostics, err = os.OpenFile(filepath.Join(dir, "arecord.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	diagnostics, err = os.OpenFile(filepath.Join(dir, "capture.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		_ = capture.Close()
 		return dir, nil, nil, err

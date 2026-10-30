@@ -420,7 +420,15 @@ func (p *Project) Validate() error {
 		ignored[gap.ID] = true
 	}
 	for id, test := range p.Inventory.Tests {
-		if (test.Suite == "e2e" || test.Suite == "mdns") && !used[id] && !ignored[id] {
+		mapped := used[id]
+		if test.Suite == "harness" {
+			for _, e := range c.Evidence {
+				if e.Suite == test.Suite && e.Package == test.Package && strings.HasPrefix(e.Test, test.Name+"/") {
+					mapped = true
+				}
+			}
+		}
+		if (strings.Contains(test.Suite, "e2e") || slices.Contains([]string{"mdns", "harness", "reference"}, test.Suite)) && !mapped && !ignored[id] {
 			return fmt.Errorf("unmapped E2E test %s", id)
 		}
 	}
@@ -466,7 +474,9 @@ func parseCitation(citation string) []Reference {
 
 func (p *Project) validateEvidence(e Evidence) error {
 	if e.Suite == "harness" {
-		if e.ID != "harness:"+e.Scenario || e.Package != "" || e.Test != "" || !slices.Contains(HarnessScenarios, e.Scenario) {
+		parent, scenario, ok := strings.Cut(e.Test, "/")
+		test, exists := p.Inventory.Tests[TestID(e.Suite, e.Package, parent)]
+		if !ok || !exists || test.Suite != "harness" || e.ID != TestID(e.Suite, e.Package, e.Test) || scenario != e.Scenario || !slices.Contains(HarnessScenarios, e.Scenario) {
 			return fmt.Errorf("invalid harness evidence %q", e.ID)
 		}
 		return nil
@@ -476,6 +486,15 @@ func (p *Project) validateEvidence(e Evidence) error {
 		return fmt.Errorf("unknown test or wrong suite: %s", e.ID)
 	}
 	return nil
+}
+
+func (p *Project) evidenceTest(e Evidence) (Test, bool) {
+	name := e.Test
+	if e.Suite == "harness" {
+		name, _, _ = strings.Cut(name, "/")
+	}
+	test, ok := p.Inventory.Tests[TestID(e.Suite, e.Package, name)]
+	return test, ok
 }
 
 func (p *Project) UnreferencedBlocks() []string {

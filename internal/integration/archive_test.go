@@ -1,3 +1,5 @@
+//go:build e2e
+
 package integration
 
 import (
@@ -7,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,15 +17,8 @@ import (
 	modzip "golang.org/x/mod/zip"
 )
 
-func TestModuleArchive(t *testing.T) {
-	if os.Getenv("SENDSPIN_ARCHIVE_INNER") == "1" {
-		t.Skip("already executing the extracted archive")
-	}
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate repository")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+func TestE2EModuleArchive(t *testing.T) {
+	root := integrationRoot
 	if _, err := os.Stat(filepath.Join(root, ".git")); os.IsNotExist(err) {
 		t.Skip("local archive validation requires a version-controlled checkout")
 	}
@@ -60,6 +54,8 @@ func TestModuleArchive(t *testing.T) {
 		"audio/native/output.go", "audio/native/select_linux.go", "audio/native/select_darwin.go", "audio/native/select_windows.go", "audio/native/select_other.go",
 		"audio/alsa/output.go", "audio/pipewire/output.go", "audio/coreaudio/output.go", "audio/wasapi/output.go", "audio/noop/output.go",
 		"internal/loopbackcmd/main.go",
+		"internal/loopback/cli.go", "internal/loopback/analyze.go", "internal/loopback/signal.go", "internal/loopback/wave.go",
+		"internal/e2etest/bootstrap.go", "internal/e2etest/runtime.go", "internal/e2etest/suite.go",
 	} {
 		if !files[required] {
 			t.Error("archive omits root-module source:", required)
@@ -77,7 +73,9 @@ func TestModuleArchive(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "test", "./...")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "SENDSPIN_ARCHIVE_INNER=1")
+	// The extracted module runs the ordinary suite, never the archive E2E
+	// tests again (including when a caller supplied tags through GOFLAGS).
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=", "SENDSPIN_ARCHIVE_INNER=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("extracted module failed: %v\n%s", err, out)
 	}

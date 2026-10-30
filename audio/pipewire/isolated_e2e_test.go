@@ -5,10 +5,7 @@ package pipewire
 import (
 	"context"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -16,181 +13,229 @@ import (
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/audio/internal/audiotest"
 	"github.com/echocat/sendspin-player-go/audio/internal/render"
+	"github.com/echocat/slf4g/testing/recording"
 )
 
-// A real dynamically loaded PipeWire stream/graph, not fake native playback.
-// Only this opt-in fixture may start its own audio server, with no hardware,
-// capture, session manager, Bluetooth or network modules.
-func TestReferenceServerPrivatePipeWireScenario(t *testing.T) {
-	if os.Getenv("SENDSPIN_PIPEWIRE_ISOLATED_E2E") != "1" {
-		t.Skip("private PipeWire independent-server fixture not requested; no host server connected")
+// One software-only server per package, including -count repetitions. There are
+// no hardware/session-manager modules and no connection to the host's server.
+func TestE2EPrivatePipeWire(t *testing.T) {
+	privateFixture.Do(func() {
+		privateFixture.value, privateFixture.skip, privateFixture.err = startPrivatePipeWire(packageSuite.Directory())
+	})
+	if privateFixture.skip != "" {
+		t.Skip(privateFixture.skip)
 	}
-	root := os.Getenv("SENDSPIN_PIPEWIRE_E2E_ROOT")
-	if !filepath.IsAbs(root) {
-		t.Fatal("explicit absolute repository root required")
+	if privateFixture.err != nil {
+		t.Fatal(privateFixture.err)
 	}
-	private := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	t.Cleanup(cancel)
-	// Build before isolating HOME, preserving the caller's normal Go caches.
-	tool := filepath.Join(private, "loopback-tool")
-	build := exec.CommandContext(ctx, "go", "build", "-o", tool, "./internal/loopbackcmd")
-	build.Dir = root
-	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off")
-	if err := build.Run(); err != nil {
-		t.Fatal("build offline reference tool:", err)
-	}
-	reference := filepath.Join(private, "reference.wav")
-	if err := exec.CommandContext(ctx, tool, "generate", "-out", reference, "-seconds", "3", "-amplitude", "0.01").Run(); err != nil {
-		t.Fatal(err)
-	}
-	// Keep AF_UNIX socket paths short even in deeply nested checkouts.
-	if err := os.MkdirAll("/tmp/opencode", 0700); err != nil {
-		t.Fatal(err)
-	}
-	runtimeDir, err := os.MkdirTemp("/tmp/opencode", "pw-e2e-")
-	if err != nil {
-		t.Fatal(err)
+	f := privateFixture.value
+	t.Logf("private graph: libpipewire %s, public SPA method-table dispatch, shared daemon pid=%d", f.graph.libraryVersion, f.daemon.Process.Pid)
+	for key, value := range f.environment() {
+		t.Setenv(key, value)
 	}
 	t.Cleanup(func() {
-		if err := os.RemoveAll(runtimeDir); err != nil {
-			t.Error(err)
+		if err := f.graph.failure(); err != nil {
+			t.Error("private native graph:", err)
+		}
+		if t.Failed() {
+			t.Log("private PipeWire daemon log tail:", f.logTail())
+			t.Log("private PipeWire registry:", f.graph.snapshot())
 		}
 	})
-	for key, value := range map[string]string{"PIPEWIRE_REMOTE": "sendspin-test", "PIPEWIRE_RUNTIME_DIR": runtimeDir, "XDG_RUNTIME_DIR": runtimeDir, "PIPEWIRE_CONFIG_DIR": private, "PIPEWIRE_CONFIG_PREFIX": "", "XDG_CONFIG_HOME": private, "HOME": private} {
-		t.Setenv(key, value)
-	}
-	client := `context.properties = { mem.allow-mlock = false log.level = 0 }
-stream.properties = { adapter.auto-port-config = { mode = dsp monitor = false position = preserve } }
-context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
-context.modules = [
- { name = libpipewire-module-protocol-native }
- { name = libpipewire-module-client-node }
- { name = libpipewire-module-adapter }
-]
-`
-	for _, name := range []string{"client.conf", "client-rt.conf"} {
-		if err := os.WriteFile(filepath.Join(private, name), []byte(client), 0600); err != nil {
-			t.Fatal(err)
+	t.Run("PlaybackLifecycle", func(t *testing.T) { testPrivatePlaybackLifecycle(t) })
+	t.Run("ReferenceScenario", func(t *testing.T) { testPrivateReferenceScenario(t) })
+	// Last in every repetition, without killing/restarting the shared server.
+	t.Run("ServerLoss", func(t *testing.T) { testPrivateStreamLoss(t, f) })
+}
+
+func privateSilence(ctx context.Context, d audio.Device, samples []float32) error {
+	// Only lifecycle silence may be explicitly discarded/rescheduled. The
+	// reference scenario retains its strict health/timeline assertions.
+	for range 8 {
+		if _, err := d.Next(ctx); err != nil {
+			return err
+		}
+		err := d.Write(ctx, samples)
+		if !errors.Is(err, render.ErrClockReset) {
+			return err
+		}
+		var reset interface{ AudioTimelineReset() bool }
+		if errors.As(err, &reset) && !reset.AudioTimelineReset() {
+			continue
+		}
+		if err := d.Flush(ctx); err != nil {
+			return err
 		}
 	}
-	server := `context.properties = {
- core.daemon = true core.name = sendspin-test
- default.clock.rate = 48000 default.clock.quantum = 1024
- mem.allow-mlock = false support.dbus = false log.level = 1
+	return fmt.Errorf("private fixture repeatedly missed its output reservation: %+v", d.(*render.Device).Diagnostics())
 }
-context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
-context.modules = [
- { name = libpipewire-module-protocol-native }
- { name = libpipewire-module-client-node }
- { name = libpipewire-module-adapter }
- { name = libpipewire-module-link-factory }
- { name = libpipewire-module-access args = { access.force = unrestricted } }
-]
-context.objects = [
- { factory = adapter args = {
-   factory.name = support.null-audio-sink node.name = sendspin-null
-   media.class = Audio/Sink node.driver = true audio.position = [ FL FR ]
-   adapter.auto-port-config = { mode = dsp monitor = false position = preserve }
- } }
-]
-`
-	config := filepath.Join(private, "pipewire.conf")
-	if err := os.WriteFile(config, []byte(server), 0600); err != nil {
-		t.Fatal(err)
+
+func testPrivatePlaybackLifecycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(packageSuite.Context(), 30*time.Second)
+	defer cancel()
+	for cycle := range 3 {
+		d, err := (Output{Device: "sendspin-null", Logger: recording.NewLogger()}).Open(ctx, audio.Format{SampleRate: 48000, Channels: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Close() })
+		for range 10 {
+			if err = privateSilence(ctx, d, make([]float32, 4800)); err != nil {
+				t.Fatal("private lifecycle", cycle, err, d.(*render.Device).Diagnostics())
+			}
+		}
+		if err = d.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err = privateSilence(ctx, d, make([]float32, 4800)); err != nil {
+			t.Fatal(err)
+		}
+		if err = d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err = d.Close(); err != nil {
+			t.Fatal("repeated close:", err)
+		}
 	}
-	log, err := os.OpenFile(filepath.Join(private, "daemon.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	t.Log("three real native playback/flush/reopen cycles; private software sink, no hardware measurement")
+}
+
+func testPrivateReferenceScenario(t *testing.T) {
+	// The shared helper generates/analyses WAVs through internal/loopback.Run,
+	// and reuses the Suite's one worker for isolated logical reference peers.
+	t.Setenv("SENDSPIN_TEST_PLAYBACK_DEVICE", "sendspin-null")
+	t.Setenv("SENDSPIN_TEST_AUDIO_BACKEND", "pipewire")
+	audiotest.RunReferenceServerPlaybackScenario(t, audiotest.ScenarioConfig{
+		Suite: packageSuite, Prefix: "SENDSPIN_PIPEWIRE", SoftwareFixture: true,
+		OutputFactory: func(device string) audio.Output { return privateDiagnosticOutput{Output: Output{Device: device}, t: t} },
+	})
+	t.Log("independent encrypted server -> SDK PCM/FLAC -> private native PipeWire graph; no physical conformance claim")
+}
+
+func testPrivateStreamLoss(t *testing.T, f *privatePipeWire) {
+	ctx, cancel := context.WithTimeout(packageSuite.Context(), 10*time.Second)
+	defer cancel()
+	var native *driver
+	o := Output{Device: "sendspin-null", Logger: recording.NewLogger()}
+	d, err := render.Open(ctx, render.Config{Backend: "private PipeWire", Logger: o.Logger}, audio.Format{SampleRate: 48000, Channels: 2}, func(d *render.Device) (render.Driver, error) {
+		p, err := openNative(o, d)
+		if err == nil {
+			native = p.(*driver)
+		}
+		return p, err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = log.Close() })
-	daemon := exec.CommandContext(ctx, "pipewire", "-c", config)
-	daemon.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + private, "XDG_CONFIG_HOME=" + private, "XDG_RUNTIME_DIR=" + runtimeDir, "PIPEWIRE_RUNTIME_DIR=" + runtimeDir, "PIPEWIRE_CONFIG_DIR=" + private}
-	daemon.Stdout, daemon.Stderr = log, log
-	if err := daemon.Start(); err != nil {
+	t.Cleanup(func() { _ = d.Close() })
+	if err = privateSilence(ctx, d, make([]float32, 4800)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = daemon.Process.Kill(); _ = daemon.Wait() })
-	readyCtx, stopReady := context.WithTimeout(ctx, 10*time.Second)
-	defer stopReady()
+	written := make(chan error, 1)
+	go func() { written <- d.Write(ctx, make([]float32, d.(*render.Device).MaxSamples())) }()
+	joinWriter := func() {
+		cancel()
+		// This is failure-path cleanup only. Report the joined writer's error
+		// without replacing the primary assertion failure below.
+		if cleanupErr := <-written; cleanupErr != nil {
+			t.Log("writer cleanup:", cleanupErr)
+		}
+	}
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	// Observe real native backpressure instead of assuming Sleep means blocked.
 	for {
-		probe := exec.CommandContext(readyCtx, "pw-link", "-i")
-		if b, err := probe.Output(); err == nil && strings.Contains(string(b), "sendspin-null:") {
+		select {
+		case err := <-written:
+			t.Fatal("writer returned before connection loss:", err)
+		case <-deadline.C:
+			joinWriter()
+			t.Fatal("writer never reached native backpressure")
+		case <-tick.C:
+		}
+		diag := d.(*render.Device).Diagnostics()
+		if diag.QueuedFrames == diag.CapacityFrames {
 			break
 		}
-		select {
-		case <-readyCtx.Done():
-			t.Fatal("private graph did not become ready", readyCtx.Err())
-		case <-time.After(20 * time.Millisecond):
+	}
+	// Same native state callback as server disconnection, but NOT evidence of
+	// daemon-crash handling or absent-server fallback. Killing the shared daemon
+	// would invalidate -count repetitions; never hide that with daemon restarts.
+	native.lockLoop()
+	code := f.graph.streamDisconnect(native.stream)
+	native.unlockLoop()
+	if code < 0 {
+		joinWriter()
+		t.Fatal(pwError("test stream disconnect", code))
+	}
+	select {
+	case err = <-written:
+		if !errors.Is(err, render.ErrDriver) {
+			t.Fatal("native connection loss did not invalidate blocked writer:", err)
 		}
+	case <-time.After(2 * time.Second):
+		joinWriter()
+		t.Fatal("native connection loss did not wake blocked writer")
 	}
-	for key, value := range map[string]string{"SENDSPIN_PIPEWIRE_E2E_PLAYBACK": "1", "SENDSPIN_PIPEWIRE_E2E_VIRTUAL": "", "SENDSPIN_PIPEWIRE_E2E_DEVICE": "sendspin-null", "SENDSPIN_PIPEWIRE_E2E_ARTIFACT_DIR": private, "SENDSPIN_PIPEWIRE_REFERENCE_FILE": reference} {
-		t.Setenv(key, value)
+	// Separate counter-evidence: an unavailable explicitly named private endpoint
+	// must fail, never reconnect to the still-running private daemon or the host.
+	if err := ctx.Err(); err != nil {
+		t.Fatal("loss test context expired before absent-endpoint assertion:", err)
 	}
-	audiotest.RunReferenceServerPlaybackScenario(t, audiotest.ScenarioConfig{Prefix: "SENDSPIN_PIPEWIRE", SoftwareFixture: true, OutputFactory: func(device string) audio.Output { return privateLinkedOutput{Output: Output{Device: device}, t: t} }})
-	t.Log("Independent encrypted server -> SDK PCM/FLAC -> real private PipeWire null graph; software integration only, no physical output/capture claim")
+	t.Setenv("PIPEWIRE_REMOTE", "sendspin-missing")
+	if unexpected, err := o.Open(ctx, audio.Format{SampleRate: 48000, Channels: 2}); err == nil {
+		_ = unexpected.Close()
+		t.Fatal("unavailable explicit private endpoint opened; no fallback is allowed")
+	} else if ctx.Err() != nil {
+		t.Fatal("absent-endpoint failure was only context cancellation:", err)
+	}
+	t.Log("native stream-disconnect wakes blocked writer; unavailable explicit endpoint fails without fallback; daemon crash is NOT covered by this repeatable shared-daemon case")
 }
 
-type privateLinkedOutput struct {
+type privateDiagnosticOutput struct {
 	Output
 	t *testing.T
 }
-type privateLinkedDevice struct {
+
+type privateDiagnosticDevice struct {
 	audio.Device
-	t      *testing.T
-	cancel context.CancelFunc
-	linked <-chan error
-	once   sync.Once
-	err    error
+	t    *testing.T
+	once sync.Once
+	err  error
 }
 
-func (o privateLinkedOutput) Open(ctx context.Context, f audio.Format) (audio.Device, error) {
-	linkCtx, cancel := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() { done <- linkPrivate(linkCtx) }()
+func (o privateDiagnosticOutput) Open(ctx context.Context, f audio.Format) (audio.Device, error) {
 	d, err := o.Output.Open(ctx, f)
 	if err != nil {
-		cancel()
-		linkErr := <-done
-		if errors.Is(linkErr, context.Canceled) {
-			linkErr = nil
-		}
-		return nil, errors.Join(err, linkErr)
+		return nil, err
 	}
-	return &privateLinkedDevice{Device: d, t: o.t, cancel: cancel, linked: done}, nil
+	return &privateDiagnosticDevice{Device: d, t: o.t}, nil
 }
 
-// Keep the health assertion strict, but expose the error it counts. In
-// particular, distinguish a recoverable timeline reset from a native fault or
-// cleanup cancellation without hiding any of them from the scenario wrapper.
-func (d *privateLinkedDevice) report(operation string, err error) error {
+// Keep tail diagnostics without converting timeline/native failures into passes.
+func (d *privateDiagnosticDevice) report(operation string, err error) error {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		d.t.Logf("private PipeWire %s failed: %v; render diagnostics: %+v", operation, err, d.Device.(*render.Device).Diagnostics())
 	}
 	return err
 }
 
-func (d *privateLinkedDevice) Next(ctx context.Context) (time.Time, error) {
+func (d *privateDiagnosticDevice) Next(ctx context.Context) (time.Time, error) {
 	at, err := d.Device.Next(ctx)
 	return at, d.report("Next", err)
 }
 
-func (d *privateLinkedDevice) Write(ctx context.Context, samples []float32) error {
+func (d *privateDiagnosticDevice) Write(ctx context.Context, samples []float32) error {
 	return d.report("Write", d.Device.Write(ctx, samples))
 }
 
-func (d *privateLinkedDevice) Flush(ctx context.Context) error {
+func (d *privateDiagnosticDevice) Flush(ctx context.Context) error {
 	return d.report("Flush", d.Device.Flush(ctx))
 }
 
-func (d *privateLinkedDevice) Close() error {
-	d.once.Do(func() {
-		d.cancel()
-		linkErr := <-d.linked
-		if errors.Is(linkErr, context.Canceled) {
-			linkErr = nil
-		}
-		d.err = d.report("Close", errors.Join(d.Device.Close(), linkErr))
-	})
+func (d *privateDiagnosticDevice) Close() error {
+	d.once.Do(func() { d.err = d.report("Close", d.Device.Close()) })
 	return d.err
 }

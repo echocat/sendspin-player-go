@@ -11,8 +11,8 @@ import json
 import struct
 
 from aiohttp import WSMsgType, web
-from aiosendspin.noise.wire import EncryptedWebSocket
 from aiosendspin.server.roles.source.events import SourceStreamStartedEvent, SourceStreamEndedEvent
+from pairing_observer import current_scope
 
 
 class SourceControls:
@@ -27,21 +27,8 @@ class SourceControls:
         client = server.get_or_create_client(client_id)
         self.client = client
         self.unsubscribe = client.add_event_listener(self.on_event)
-        self._receive = EncryptedWebSocket.receive
-        self._receive_timed = EncryptedWebSocket.receive_timed
-
-        async def receive(transport):
-            result = await self._receive(transport)
-            self.observe(result)
-            return result
-
-        async def receive_timed(transport, clock):
-            result, at = await self._receive_timed(transport, clock)
-            self.observe(result)
-            return result, at
-
-        EncryptedWebSocket.receive = receive
-        EncryptedWebSocket.receive_timed = receive_timed
+        self.scope = current_scope.get()
+        self.scope.source = self
 
     def observe(self, message):
         if len(self.events) >= 512:
@@ -107,5 +94,4 @@ class SourceControls:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
-        EncryptedWebSocket.receive = self._receive
-        EncryptedWebSocket.receive_timed = self._receive_timed
+        self.scope.source = None

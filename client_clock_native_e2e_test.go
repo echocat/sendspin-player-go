@@ -14,7 +14,7 @@ import (
 	"github.com/echocat/sendspin-player-go/internal/timesync"
 )
 
-func TestReferenceNativeClockConvergesAfterStartupBursts(t *testing.T) {
+func TestE2EReferenceNativeClockConvergesAfterStartupBursts(t *testing.T) {
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
