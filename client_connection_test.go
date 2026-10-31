@@ -82,3 +82,36 @@ func TestConnectDoesNotFollowWebSocketRedirects(t *testing.T) {
 		})
 	}
 }
+
+func TestPairingRestartClosesProvisionalHandshake(t *testing.T) {
+	c := newAutomaticClient(t, &MemoryStore{})
+	server := httptest.NewServer(c)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	// Reading client/init proves registration; never send server/init or Noise.
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	registered := len(c.sessions)
+	c.mu.Unlock()
+	if registered != 1 {
+		t.Fatal("missing provisional connection")
+	}
+	result, err := c.RestartPairing(ctx)
+	if err != nil || !result.Committed {
+		t.Fatal("provisional handshake blocked reset", err)
+	}
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Fatal("old provisional transport still open")
+	}
+	if p := c.PairingState(); !p.Ready || p.Restarting {
+		t.Fatal("provisional session did not release readiness", p)
+	}
+}

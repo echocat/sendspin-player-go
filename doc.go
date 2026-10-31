@@ -17,4 +17,9 @@
 // The identity private key and pairing token are secrets; ClientID is the public
 // identity. Never log a Credentials value or expose its serialized form to peers.
 // Logging uses only the slf4g facade; applications choose the output provider.
+//
+// [CodePairingConfig] documents opt-in automatic PIN admission, its protocol
+// limits and durable rate protection. [Client.CurrentPairingPIN] is the explicit
+// secret display interface; [Client.RestartPairing] documents administrator
+// authorization, revocation and before/after-commit cancellation semantics.
 package sendspin

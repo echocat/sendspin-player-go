@@ -52,6 +52,9 @@ func (s *MemoryStore) Save(ctx context.Context, c Credentials) error {
 // FileStore saves credentials with an atomic same-directory rename and 0600
 // permissions on Unix. On Windows the application must secure the directory ACL.
 // Do not share a path between devices or concurrent Client instances.
+// File data is synced before replacement; the parent directory is not fsynced.
+// This is not a guarantee against every storage/power-loss scenario. A successful
+// rename is the commit point; cancellation afterwards is not rollback.
 type FileStore struct{ Path string }
 
 func (s FileStore) Load(ctx context.Context) (Credentials, error) {

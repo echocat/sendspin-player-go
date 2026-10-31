@@ -38,6 +38,10 @@ type PairingRecord struct {
 }
 
 // Credentials are persisted as one transaction. Records are ordered oldest first.
+// JSON/Secret serialization is a confidential persistence format, not a redacted
+// snapshot. Never expose it through UI responses, logs or telemetry. Custom Stores
+// must preserve every field; missing optional pairing-protection fields in older
+// files mean zero/false. See [CodePairingConfig] for counting and reboot behavior.
 type Credentials struct {
 	PrivateKey           Secret          `json:"private_key"`
 	PairingPSK           Secret          `json:"pairing_psk"`
@@ -48,6 +52,11 @@ type Credentials struct {
 	Muted                bool            `json:"muted"`
 	StaticPairingPIN     *Secret         `json:"static_pairing_pin,omitempty"`
 	DynamicPairingRounds uint32          `json:"dynamic_pairing_rounds,omitempty"`
+	// Automatic-pairing protection, additive for old credential files. No PIN
+	// is persisted. Cooldowns are restarted in full on process startup.
+	PairingFailures    uint8 `json:"pairing_failures,omitempty"`
+	PairingCooldown    bool  `json:"pairing_cooldown,omitempty"`
+	PairingAuthPending bool  `json:"pairing_auth_pending,omitempty"`
 }
 
 func (Credentials) String() string   { return "[sendspin credentials REDACTED]" }
@@ -132,6 +141,9 @@ type Store interface {
 }
 
 func validateCredentials(c Credentials) error {
+	if c.PairingFailures >= 5 {
+		return errors.New("sendspin: invalid persisted pairing failure count")
+	}
 	if c.DynamicPairingRounds > 20 {
 		return errors.New("sendspin: invalid persisted pairing limit")
 	}

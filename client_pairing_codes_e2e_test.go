@@ -39,7 +39,7 @@ func codePairClient(t *testing.T, suite, method string, inbound ...bool) (*Clien
 	ctx := context.Background()
 	store := &MemoryStore{}
 	shown := make(chan PairingPIN, 32)
-	cfg := &CodePairingConfig{Static: method == "static_pairing_code"}
+	cfg := &CodePairingConfig{Static: method == "static_pairing_code", Automatic: method == "automatic"}
 	if !cfg.Static {
 		cfg.Display = func(_ context.Context, event PairingDisplay) error {
 			if event.Active {

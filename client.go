@@ -49,6 +49,15 @@ type Client struct {
 	events        chan Event
 	pairWindow    pairingWindow
 	playerControl *playerControl
+	// Pairing policy and revocation are serialized with credential transactions.
+	pairingGeneration    uint64
+	pairingRevision      uint64
+	pairingRestarting    bool
+	pairingPaused        bool
+	pairingBlocked       bool
+	pairingCooldownUntil time.Time
+	pairingPIN           PairingPINDisplay
+	pairingPINOwner      *session
 }
 
 // New validates and copies configuration and loads (or creates and saves) the
@@ -86,6 +95,9 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		}
 	}
 	c := &Client{cfg: config, credentials: credentials, sessions: map[*session]bool{}, events: make(chan Event, 64)}
+	if credentials.PairingCooldown || credentials.PairingAuthPending {
+		c.pairingCooldownUntil = pairingNow().Add(pairingCooldown)
+	}
 	if config.PlayerControl != nil {
 		c.playerControl = newPlayerControl(c, *config.PlayerControl)
 	}
@@ -168,7 +180,9 @@ func validateEndpoint(endpoint string) error {
 
 // Run reconnects transient handshake, idle and playback failures with capped
 // exponential backoff. A pairing-only drop terminates the attempt; resumption is
-// operator-driven. Protocol and authorization failures are returned as well.
+// operator-driven unless Automatic PIN mode is enabled. Protocol and
+// authorization failures are returned as well. A committed pairing restart is
+// reported by Connect as GoodbyeError("restart"); Run reconnects after backoff.
 func (c *Client) Run(ctx context.Context, endpoint string) error {
 	if err := c.enter("outbound"); err != nil {
 		return err
@@ -262,13 +276,28 @@ func (c *Client) handle(ctx context.Context, conn *websocket.Conn) (result error
 	defer cancel()
 	s := newSession(c, ctx, cancel)
 	c.mu.Lock()
+	c.refreshPairingLocked()
+	if c.pairingRestarting {
+		c.mu.Unlock()
+		return ErrPairingRestarting
+	}
 	if len(c.sessions) >= min(4, c.cfg.RecordCapacity-1) {
 		c.mu.Unlock()
 		return ErrConnectionLimit
 	}
 	c.sessions[s] = true
+	s.pairingGeneration = c.pairingGeneration
+	s.transport = conn
 	key := c.credentials.PrivateKey
 	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		revoked := s.revoked
+		c.mu.Unlock()
+		if revoked {
+			result = &GoodbyeError{"restart"}
+		}
+	}()
 	defer func() {
 		c.endPlayerControlSession(s)
 		s.endPairing(true)
@@ -280,6 +309,7 @@ func (c *Client) handle(ctx context.Context, conn *websocket.Conn) (result error
 		if c.active == s {
 			c.active = nil
 		}
+		c.refreshPairingLocked()
 		c.mu.Unlock()
 		close(s.done)
 	}()
@@ -296,7 +326,7 @@ func (c *Client) handle(ctx context.Context, conn *websocket.Conn) (result error
 	c.mu.Lock()
 	pairingOnly := c.mode == "outbound" && s.activated && s.rank == 1
 	c.mu.Unlock()
-	if err != nil && pairingOnly {
+	if err != nil && pairingOnly && !c.automaticPairing() {
 		return &pairingSessionEnded{cause: err}
 	}
 	return err
@@ -310,6 +340,9 @@ func (c *Client) sessionResolver(s *session, serverID string) wire.Resolve {
 	return func(id, category string, initial bool) (wire.Selection, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		if c.pairingRestarting || (s != nil && !s.pairingCurrentLocked()) {
+			return wire.Selection{}, ErrPairingRestarting
+		}
 		// A handshake has selected its PSK before Channel is returned. Protect
 		// this record immediately, including while the connection is provisional.
 		// A non-initial pr/sn selection must keep an old lt binding protected
@@ -366,6 +399,9 @@ func (s *session) commitChannel(channel *wire.Channel) {
 func (c *Client) update(ctx context.Context, f func(*Credentials) error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	next := cloneCredentials(c.credentials)
 	if err := f(&next); err != nil {
 		return err
@@ -373,7 +409,18 @@ func (c *Client) update(ctx context.Context, f func(*Credentials) error) error {
 	if err := c.cfg.Store.Save(ctx, cloneCredentials(next)); err != nil {
 		return err
 	}
+	pairingChanged := c.credentials.DynamicPairingRounds != next.DynamicPairingRounds ||
+		c.credentials.PairingFailures != next.PairingFailures || c.credentials.PairingCooldown != next.PairingCooldown ||
+		c.credentials.PairingAuthPending != next.PairingAuthPending || (len(c.credentials.Records) == 0) != (len(next.Records) == 0)
 	c.credentials = next
+	if c.automaticPairing() {
+		if len(next.Records) != 0 {
+			c.pairingPIN = PairingPINDisplay{}
+		}
+		if pairingChanged {
+			c.pairingChangedLocked()
+		}
+	}
 	return nil
 }
 

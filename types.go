@@ -88,7 +88,8 @@ type Config struct {
 	CipherSuite        string
 	HandshakeTimeout   time.Duration
 	DisableDiscovery   bool
-	// CodePairing enables optional PIN methods. Nil keeps PSK-only behavior.
+	// CodePairing enables optional PIN methods and automatic unpaired policy.
+	// Nil keeps PSK-only behavior.
 	CodePairing *CodePairingConfig
 	// Logger overrides the package's slf4g facade for this Client. Nil uses the
 	// application's provider. The SDK never installs an output implementation.
@@ -113,10 +114,10 @@ func (c *Config) defaults() error {
 	if c.CodePairing != nil {
 		copy := *c.CodePairing
 		c.CodePairing = &copy
-		if copy.Static && copy.Display != nil {
+		if copy.Static && (copy.Display != nil || copy.Automatic) {
 			return errors.New("sendspin: RC1 permits at most one PIN method per Client")
 		}
-		if !copy.Static && copy.Display == nil {
+		if !copy.Static && copy.Display == nil && !copy.Automatic {
 			return errors.New("sendspin: empty code-pairing configuration")
 		}
 	}
