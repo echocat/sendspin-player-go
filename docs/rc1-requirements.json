@@ -30217,6 +30217,18 @@
   "source_gaps": [],
   "unmapped_tests": [
     {
+      "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceAutomaticPINPairingAndRestart",
+      "reason": "Opt-in automatic dynamic PIN policy: reference-peer CPace success/rekey in both suites/directions and paired-session reset with identity/settings preservation. Supplemental policy evidence, not a promotion of frozen PSK-only primary assessments or a security certification; see CodePairingConfig and Client.RestartPairing GoDoc."
+    },
+    {
+      "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceAutomaticPINFiveFailuresAndPendingCooldown",
+      "reason": "Opt-in automatic dynamic PIN policy: five verified confirmation failures abort the attempt and hold the next activation pending until the device-wide cooldown ends, followed by successful pairing. Private monotonic deadline advancement avoids a wall-clock/sleep assertion. No frozen primary assessment promotion; see CodePairingConfig GoDoc."
+    },
+    {
+      "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceAutomaticPINRestartAbortsInProgressAttempt",
+      "reason": "Opt-in administrator pairing restart: a reference-peer attempt waiting for PIN entry loses its transport and cannot persist records after reset. Supplemental reset/policy evidence, not independent cryptographic review or frozen primary assessment promotion; see Client.RestartPairing GoDoc."
+    },
+    {
       "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EClientShimArguments",
       "reason": "Harness-binding regression: native argument forwarding, including Windows quoting and empty or spaced values. This validates the launch adapter, not an upstream conformance verdict or a protocol obligation."
     },

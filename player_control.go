@@ -259,6 +259,11 @@ func (p *playerControl) invalidateLocked() {
 }
 
 func (c *Client) setPlayerControlSession(s *session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !s.pairingCurrentLocked() || c.pairingRestarting || s.ctx.Err() != nil {
+		return
+	}
 	if p := c.playerControl; p != nil {
 		p.mu.Lock()
 		if p.owner == s {

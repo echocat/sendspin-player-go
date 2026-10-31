@@ -34,6 +34,20 @@ func (s *session) endCodePairing() {
 		return
 	}
 	s.codePairing = nil
+	if s.client.automaticPairing() {
+		c := s.client
+		c.mu.Lock()
+		if c.pairingPINOwner == s {
+			c.pairingPIN, c.pairingPINOwner = PairingPINDisplay{}, nil
+		}
+		if s.pairingCurrentLocked() && c.credentials.PairingAuthPending {
+			// An unanswered confirmation is NOT a proven wrong PIN. Its
+			// durable reservation conservatively delays another attempt.
+			c.pairingCooldownUntil = pairingNow().Add(pairingCooldown)
+		}
+		c.pairingChangedLocked()
+		c.mu.Unlock()
+	}
 	if p.pake != nil {
 		p.pake.Close()
 	}
@@ -66,6 +80,9 @@ func (s *session) codeReady() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if p.method == "dynamic_pairing_code" {
+		if c.automaticPairing() {
+			return s.pairingCurrentLocked() && c.pairingStateLocked().Ready
+		}
 		return c.credentials.DynamicPairingRounds < 20
 	}
 	w := c.pairWindow
@@ -92,7 +109,7 @@ func (s *session) updatePairingCounter(update func(*Credentials) error) (bool, e
 		ctx, cancel = context.WithDeadline(ctx, s.pairingDeadline)
 		defer cancel()
 	}
-	err := s.client.update(ctx, func(c *Credentials) error {
+	err := s.update(ctx, func(c *Credentials) error {
 		if !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline) {
 			return errPairingDeadline
 		}
@@ -101,6 +118,15 @@ func (s *session) updatePairingCounter(update func(*Credentials) error) (bool, e
 	if err != nil {
 		if (errors.Is(err, errPairingDeadline) || errors.Is(err, context.DeadlineExceeded)) && !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline) {
 			return s.checkPairingTimeout(monotime.Now())
+		}
+		if s.client.automaticPairing() && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrPairingRestarting) {
+			s.client.mu.Lock()
+			if s.pairingCurrentLocked() {
+				s.client.pairingBlocked = true
+				s.client.pairingPIN = PairingPINDisplay{}
+				s.client.pairingChangedLocked()
+			}
+			s.client.mu.Unlock()
 		}
 		return false, err
 	}
@@ -199,6 +225,12 @@ func (s *session) codeMessage(kind string, data []byte) error {
 			if c.DynamicPairingRounds >= 20 {
 				return protocol.ErrProtocol
 			}
+			if s.client.automaticPairing() {
+				if len(c.Records) > 0 || s.client.pairingPaused || s.client.pairingBlocked || pairingNow().Before(s.client.pairingCooldownUntil) {
+					return ErrPairingActive
+				}
+				c.PairingCooldown, c.PairingAuthPending = false, false
+			}
 			c.DynamicPairingRounds++
 			return nil
 		}); expired || err != nil {
@@ -206,6 +238,20 @@ func (s *session) codeMessage(kind string, data []byte) error {
 		}
 		p.round++
 		p.state = "auth"
+		if s.client.automaticPairing() {
+			s.client.mu.Lock()
+			if !s.pairingCurrentLocked() || s.ctx.Err() != nil {
+				s.client.mu.Unlock()
+				return ErrPairingRestarting
+			}
+			s.client.pairingPIN = PairingPINDisplay{PIN: p.pin, ValidUntil: s.pairingDeadline}
+			s.client.pairingPINOwner = s
+			s.client.pairingChangedLocked()
+			s.client.mu.Unlock()
+		}
+		if s.client.cfg.CodePairing.Display == nil {
+			return nil
+		}
 		p.displayed = true
 		displayCtx, stopDisplay := context.WithDeadline(s.ctx, s.pairingDeadline)
 		displayErr := s.client.cfg.CodePairing.Display(displayCtx, PairingDisplay{Active: true, PIN: p.pin, ServerID: s.channel.ServerID, Round: p.round})
@@ -236,6 +282,17 @@ func (s *session) codeMessage(kind string, data []byte) error {
 		if err != nil {
 			return protocol.ErrProtocol
 		}
+		if s.client.automaticPairing() {
+			// Persist before emitting a response that permits a password guess.
+			// A crash between verification and its write cannot erase protection.
+			if expired, err := s.updatePairingCounter(func(c *Credentials) error {
+				c.PairingAuthPending = true
+				return nil
+			}); expired || err != nil {
+				result.Close()
+				return err
+			}
+		}
 		p.pake = result
 		p.state = "confirm"
 		return s.send("client/pair-auth", map[string]string{"pake_msg_2": base64.RawURLEncoding.EncodeToString(yb)})
@@ -262,7 +319,14 @@ func (s *session) codeMessage(kind string, data []byte) error {
 		}
 		defer clear(isk[:])
 		if p.method == "dynamic_pairing_code" {
-			if expired, storeErr := s.updatePairingCounter(func(c *Credentials) error { c.DynamicPairingRounds = 0; return nil }); expired || storeErr != nil {
+			if expired, storeErr := s.updatePairingCounter(func(c *Credentials) error {
+				c.DynamicPairingRounds = 0
+				if s.client.automaticPairing() {
+					c.PairingAuthPending = false
+					s.client.pairingPIN = PairingPINDisplay{}
+				}
+				return nil
+			}); expired || storeErr != nil {
 				return storeErr
 			}
 		}
@@ -298,6 +362,31 @@ func (s *session) codeMessage(kind string, data []byte) error {
 }
 func (s *session) codeMismatch() error {
 	p := s.codePairing
+	if s.client.automaticPairing() {
+		cooldown := false
+		if expired, err := s.updatePairingCounter(func(c *Credentials) error {
+			c.PairingAuthPending = false
+			c.PairingFailures++
+			if c.PairingFailures == 5 {
+				c.PairingFailures = 0
+				c.PairingCooldown = true
+				cooldown = true
+			}
+			return nil
+		}); expired || err != nil {
+			return err
+		}
+		if cooldown {
+			s.client.mu.Lock()
+			if s.pairingCurrentLocked() {
+				s.client.pairingCooldownUntil = pairingNow().Add(pairingCooldown)
+				s.client.pairingChangedLocked()
+			}
+			s.client.mu.Unlock()
+			s.endPairing(true)
+			return s.send("pair/abort", map[string]string{"reason": "pairing_code_mismatch"})
+		}
+	}
 	if p.method == "dynamic_pairing_code" {
 		s.client.mu.Lock()
 		count := s.client.credentials.DynamicPairingRounds

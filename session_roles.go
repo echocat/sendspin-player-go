@@ -62,7 +62,7 @@ func (s *session) request(r request) error {
 		if s.client.playerControl != nil && r.kind != "delay" {
 			return s.client.playerControl.enqueue(s, r)
 		}
-		if err := s.client.update(r.ctx, func(c *Credentials) error {
+		if err := s.update(r.ctx, func(c *Credentials) error {
 			switch r.kind {
 			case "volume":
 				c.Volume = r.value.(int)

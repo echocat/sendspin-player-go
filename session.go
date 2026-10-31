@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/echocat/sendspin-player-go/audio"
 	"github.com/echocat/sendspin-player-go/codec"
 	"github.com/echocat/sendspin-player-go/diagnostic"
@@ -42,7 +43,10 @@ type session struct {
 	// Admission and credential-protection fields are protected by Client.mu.
 	rank                                int
 	pairingAttempt                      bool
-	retiring                            bool // Admission already decided a handoff; guarded by Client.mu.
+	retiring                            bool            // Admission already decided a handoff; guarded by Client.mu.
+	revoked                             bool            // Guarded by Client.mu.
+	pairingGeneration                   uint64          // Guarded by Client.mu.
+	transport                           *websocket.Conn // Immutable after registration.
 	recordServerID                      string
 	pendingPSK                          *Secret
 	pairingDeadline                     time.Time
@@ -71,7 +75,10 @@ type session struct {
 
 func newSession(c *Client, ctx context.Context, cancel context.CancelFunc) *session {
 	started := monotime.Now()
-	return &session{client: c, ctx: ctx, cancel: cancel, done: make(chan struct{}), requests: make(chan request), controlUpdates: make(chan struct{}, 1), displace: make(chan string, 1), filter: timesync.New(), epoch: started, activationDeadline: started.Add(min(c.cfg.HandshakeTimeout, 30*time.Second)), active: map[string]Role{}, streams: map[string]bool{}, willing: true, burstLeft: 8}
+	c.mu.Lock()
+	generation := c.pairingGeneration
+	c.mu.Unlock()
+	return &session{client: c, ctx: ctx, cancel: cancel, pairingGeneration: generation, done: make(chan struct{}), requests: make(chan request), controlUpdates: make(chan struct{}, 1), displace: make(chan string, 1), filter: timesync.New(), epoch: started, activationDeadline: started.Add(min(c.cfg.HandshakeTimeout, 30*time.Second)), active: map[string]Role{}, streams: map[string]bool{}, willing: true, burstLeft: 8}
 }
 func (s *session) now() int64         { return monotime.Since(s.epoch).Microseconds() + 1 }
 func (s *session) has(role Role) bool { return slices.Contains(s.state.ActiveRoles, role) }
@@ -257,6 +264,11 @@ func (s *session) run() error {
 				return s.fatal
 			}
 		case <-tick.C:
+			if s.client.automaticPairing() {
+				s.client.mu.Lock()
+				s.client.refreshPairingLocked()
+				s.client.mu.Unlock()
+			}
 			if s.awaitingActivation && monotime.Now().After(s.activationDeadline) {
 				return fmt.Errorf("%w: re-handshake activation timeout", protocol.ErrProtocol)
 			}
@@ -356,6 +368,9 @@ func (s *session) displaced(reason string) error {
 }
 
 func (s *session) dispatch(frame []byte) error {
+	if err := s.checkPairingGeneration(); err != nil {
+		return err
+	}
 	if len(frame) == 0 {
 		return protocol.ErrProtocol
 	}
@@ -470,7 +485,7 @@ func (s *session) dispatch(frame []byte) error {
 		if s.channel.Category != "lt" {
 			return nil
 		}
-		if err = s.client.update(s.ctx, func(c *Credentials) error {
+		if err = s.update(s.ctx, func(c *Credentials) error {
 			c.Records = slices.DeleteFunc(c.Records, func(r PairingRecord) bool { return r.ServerID == s.channel.ServerID })
 			return nil
 		}); err != nil {
@@ -491,7 +506,7 @@ func (s *session) sendHello() error {
 		if cfg.CodePairing.Static {
 			methods["static_pairing_code"] = map[string]any{"locations": []string{"operator"}}
 		}
-		if cfg.CodePairing.Display != nil {
+		if cfg.CodePairing.Display != nil || cfg.CodePairing.Automatic {
 			methods["dynamic_pairing_code"] = map[string]any{"out_channels": []string{"display"}, "formats": []string{"digits"}}
 		}
 	}
@@ -559,7 +574,7 @@ func (s *session) activate(data []byte) error {
 		}
 		if s.channel.Category == "sn" && s.client.cfg.CodePairing != nil {
 			cfg := s.client.cfg.CodePairing
-			pairingSupported = (method == "static_pairing_code" && cfg.Static && pairing.Format == nil) || (method == "dynamic_pairing_code" && cfg.Display != nil && pairFormat == "digits")
+			pairingSupported = (method == "static_pairing_code" && cfg.Static && pairing.Format == nil) || (method == "dynamic_pairing_code" && (cfg.Display != nil || cfg.Automatic) && pairFormat == "digits")
 		}
 	}
 	roles := s.state.ActiveRoles
@@ -628,7 +643,7 @@ func (s *session) activate(data []byte) error {
 		s.clearRole(family)
 	}
 	if seen["playback"] {
-		if err := s.client.update(s.ctx, func(c *Credentials) error { c.LastPlaybackServer = s.channel.ServerID; return nil }); err != nil {
+		if err := s.update(s.ctx, func(c *Credentials) error { c.LastPlaybackServer = s.channel.ServerID; return nil }); err != nil {
 			return err
 		}
 	}
@@ -708,18 +723,35 @@ func (s *session) activate(data []byte) error {
 func (s *session) setPairingAttempt(active bool) {
 	s.client.mu.Lock()
 	s.pairingAttempt = active
+	if s.client.automaticPairing() {
+		s.client.pairingChangedLocked()
+	}
 	s.client.mu.Unlock()
 }
 
 func (s *session) beginPairingAttempt() bool {
 	s.client.mu.Lock()
 	defer s.client.mu.Unlock()
-	if s.retiring {
+	if s.retiring || !s.pairingCurrentLocked() {
 		return false
+	}
+	if s.client.automaticPairing() && s.codePairing != nil {
+		p := s.client.pairingStateLocked()
+		if !p.Ready {
+			return false
+		}
+	}
+	for other := range s.client.sessions {
+		if other != s && other.pairingAttempt {
+			return false
+		}
 	}
 	// Linearize protection before transmission: the peer may receive pair-init
 	// before Write (or an observer after Write) returns to this actor.
 	s.pairingAttempt = true
+	if s.client.automaticPairing() {
+		s.client.pairingChangedLocked()
+	}
 	return true
 }
 
@@ -727,6 +759,10 @@ func (c *Client) admit(s *session, rank int, incomingPairing bool) error {
 	c.admission.Lock()
 	defer c.admission.Unlock()
 	c.mu.Lock()
+	if !s.pairingCurrentLocked() || c.pairingRestarting {
+		c.mu.Unlock()
+		return ErrPairingRestarting
+	}
 	if err := s.ctx.Err(); err != nil {
 		c.mu.Unlock()
 		return err
@@ -762,6 +798,10 @@ func (c *Client) admit(s *session, rank int, incomingPairing bool) error {
 		}
 	}
 	c.mu.Lock()
+	if !s.pairingCurrentLocked() || c.pairingRestarting {
+		c.mu.Unlock()
+		return ErrPairingRestarting
+	}
 	if err := s.ctx.Err(); err != nil {
 		c.mu.Unlock()
 		return err
@@ -789,7 +829,10 @@ func (s *session) finalizePairing(data []byte) error {
 		storeCtx, cancel = context.WithDeadline(s.ctx, s.pairingDeadline)
 		defer cancel()
 	}
-	err := s.client.update(storeCtx, func(c *Credentials) error {
+	err := s.update(storeCtx, func(c *Credentials) error {
+		if s.client.automaticPairing() && s.codePairing != nil && len(c.Records) != 0 {
+			return ErrPairingActive
+		}
 		// Waiting for another credential transaction must not extend an attempt.
 		if !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline) {
 			return errPairingDeadline
@@ -814,6 +857,10 @@ func (s *session) finalizePairing(data []byte) error {
 			}
 		}
 		c.Records = append(c.Records, PairingRecord{ServerID: s.channel.ServerID, PSK: psk})
+		if s.client.automaticPairing() {
+			c.PairingFailures = 0
+			c.PairingAuthPending = false
+		}
 		return nil
 	})
 	if errors.Is(err, errPairingDeadline) || (errors.Is(err, context.DeadlineExceeded) && !s.pairingDeadline.IsZero() && !monotime.Now().Before(s.pairingDeadline)) {
@@ -825,7 +872,11 @@ func (s *session) finalizePairing(data []byte) error {
 			s.closePairingWindow()
 		}
 		s.endPairing(false)
-		s.client.emit(Event{Kind: "paired", ServerID: s.channel.ServerID})
+		s.client.mu.Lock()
+		if s.pairingCurrentLocked() {
+			s.client.emit(Event{Kind: "paired", ServerID: s.channel.ServerID})
+		}
+		s.client.mu.Unlock()
 		s.client.logger().Info("Sendspin pairing record persisted")
 	}
 	return err
