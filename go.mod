@@ -10,7 +10,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/mewkiz/flac v1.0.14
 	github.com/miekg/dns v1.1.73
-	github.com/thesyncim/gopus v0.2.2
+	github.com/thesyncim/gopus v0.2.3
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.62.0
