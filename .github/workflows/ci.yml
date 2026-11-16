@@ -25,7 +25,7 @@ jobs:
       MISE_ENV: ${{ matrix.go.mise-env }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - name: Ordinary Go tests, with race detection and coverage
         run: mise run test --race --coverage -- -json
       - name: Ordinary Go tests without CGO
@@ -53,7 +53,7 @@ jobs:
       SENDSPIN_REFERENCE_UBSAN: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - name: Install optional Linux native runtime libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
@@ -71,7 +71,7 @@ jobs:
       SENDSPIN_TEST_CAPTURE_DEVICE: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - name: Install optional Linux native runtime libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pipewire-bin libpipewire-0.3-modules libspa-0.2-modules libasound2t64
@@ -87,13 +87,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - run: mise run lint
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - name: Reachable dependency vulnerabilities and bounded Go fuzz tests
         run: >-
           mise run vuln ::: test:fuzz
@@ -102,6 +102,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
       - run: >-
           mise run lint:audit ::: audit:verify-spec ::: audit:verify-noise ::: audit:verify-mdns
