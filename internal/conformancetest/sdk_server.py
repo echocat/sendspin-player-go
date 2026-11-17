@@ -4,6 +4,8 @@ The pinned adapter anchors its clip only 250 ms in the future, before the
 server's first conversion. Importing PyAV/NumPy inside that window can make the
 server discard chunks as late on a busy CI runner (especially PCM24 conversion).
 Keep import time outside the scenario; do not change timestamps or verdicts.
+The launch binding in run.py separately budgets adapter readiness, including
+cold imports, without extending scenario execution or fabricating a ready file.
 """
 
 import runpy

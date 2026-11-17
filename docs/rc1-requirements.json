@@ -30237,6 +30237,10 @@
       "reason": "Harness startup regression: slow cold audio imports finish before launching the unchanged official server adapter, arguments are preserved and import failures remain fatal. Launch infrastructure only, not a protocol verdict or physical timing claim."
     },
     {
+      "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EHarnessReadinessBudget",
+      "reason": "Harness startup policy regression: only adapter readiness gets a bounded cold-start budget, while scenario/process deadlines, other file waits and native verdict functions stay unchanged. Readiness timeouts and cancellation must still propagate; this is infrastructure coverage, not protocol fulfillment evidence."
+    },
+    {
       "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceSourcePCMInputLifecycleAndReconnect",
       "reason": "Explicit opt-in source@v1 extension at the unchanged specification pin. Independent source decoder verifies PCM16, lifecycle/order, timestamps, availability and reconnect with deterministic fake Input; not a promotion of frozen player-only primary assessments or physical ADC evidence. See docs/audio.md#opt-in-source-capture."
     },
@@ -30327,6 +30331,10 @@
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/pipewire#TestE2EPrivatePipeWire",
       "reason": "One package-scoped private software-only PipeWire daemon covers merged PlaybackLifecycle, ReferenceScenario and ServerLoss subcases, including repeated Go test counts. ServerLoss aborts a native stream without killing or restarting the daemon; it is not a daemon-crash test. This remains separate from generic audio/native hardware evidence and proves no physical output or capture."
+    },
+    {
+      "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/pipewire#TestE2EPrivateSocketReadinessRequiresListener",
+      "reason": "Private fixture startup regression: a bound Unix socket path is not readiness until listen accepts connections; cancellation still prevents readiness. Software test infrastructure only, not physical audio evidence or primary obligation fulfillment."
     },
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EReferenceServerFakeInputScenario",

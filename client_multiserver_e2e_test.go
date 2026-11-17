@@ -553,6 +553,7 @@ wait:
 
 type handoffOutput struct {
 	active  atomic.Int32
+	writing atomic.Int32
 	opens   atomic.Int32
 	closes  atomic.Int32
 	overlap atomic.Bool
@@ -580,6 +581,12 @@ func (d *handoffDevice) Close() error {
 	return err
 }
 
+func (d *handoffDevice) Write(ctx context.Context, samples []float32) error {
+	d.owner.writing.Add(1)
+	defer d.owner.writing.Add(-1)
+	return d.Device.Write(ctx, samples)
+}
+
 func TestE2EReferencePlaybackHandoffClosesThePreviousOutput(t *testing.T) {
 	ctx := context.Background()
 	cred, err := NewCredentials()
@@ -602,18 +609,19 @@ func TestE2EReferencePlaybackHandoffClosesThePreviousOutput(t *testing.T) {
 	endpoint, stop := serveTestClient(t, client)
 	a.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
 	eventually(t, func() bool { return client.Snapshot().Available })
+	eventually(t, func() bool { return a.control(t, map[string]any{"command": "status"})["available"] == true })
 	// Keep several seconds queued so displacement cancels an in-flight Write,
 	// rather than merely closing an already empty output after playback ended.
 	a.control(t, map[string]any{"command": "stream", "frames": 144000})
-	if output.active.Load() != 1 {
-		t.Fatal("first server did not open its output")
-	}
+	eventually(t, func() bool { return output.active.Load() == 1 && output.writing.Load() > 0 })
 	b.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
 	eventually(t, func() bool { return client.Snapshot().ServerID == b.id && client.Snapshot().Available })
 	if output.active.Load() != 0 || output.closes.Load() != 1 {
 		t.Fatal("old output survived admission of the next server")
 	}
+	eventually(t, func() bool { return b.control(t, map[string]any{"command": "status"})["available"] == true })
 	b.control(t, map[string]any{"command": "stream"})
+	eventually(t, func() bool { return output.active.Load() == 1 && output.opens.Load() == 2 })
 	if output.overlap.Load() || output.active.Load() != 1 || output.opens.Load() != 2 {
 		t.Fatal("two servers owned the output concurrently")
 	}

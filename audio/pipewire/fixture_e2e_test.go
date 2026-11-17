@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,10 +121,7 @@ func startPrivatePipeWire(directory string) (_ *privatePipeWire, skip string, re
 	defer cancel()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
-	for {
-		if _, err = os.Stat(filepath.Join(f.runtime, "sendspin-test")); err == nil {
-			break
-		}
+	for !privateSocketReady(ctx, filepath.Join(f.runtime, "sendspin-test")) {
 		select {
 		case <-f.done:
 			return nil, "", fmt.Errorf("private PipeWire daemon exited before readiness: %v", f.waitErr)
@@ -152,6 +150,17 @@ func startPrivatePipeWire(directory string) (_ *privatePipeWire, skip string, re
 		return nil, "", err
 	}
 	return f, "", nil
+}
+
+func privateSocketReady(ctx context.Context, path string) bool {
+	// bind(2) creates the path before listen(2) makes connections possible.
+	// Probe the listener, not the file, before opening the native graph once.
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close() // Probe cleanup must not replace successful readiness.
+	return true
 }
 
 func (f *privatePipeWire) logTail() string {

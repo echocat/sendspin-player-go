@@ -1,7 +1,8 @@
 """JSON-lines binding to unchanged, pinned official harness calls.
 
 Go owns the fixture, ports, scenario inventory, SDK build, process and cleanup.
-This module only registers the SDK's launch shim and forwards native verdicts.
+This module registers launch shims, budgets adapter readiness separately from
+scenario execution, and forwards unchanged native verdicts.
 """
 
 import aiosendspin
@@ -15,12 +16,26 @@ import sys
 from conformance import runner
 from conformance.implementations import IMPLEMENTATIONS
 from conformance.models import ImplementationSpec, RoleSpec
+from conformance.process import wait_for_file
 from pathlib import Path
 
 IMPLEMENTATION = "sendspin-player-go"
+ADAPTER_READY_TIMEOUT_SECONDS = 60
+
+
+async def wait_for_adapter_file(path, timeout_s):
+    # The pinned runner hardcodes ten seconds for cold Python adapter startup,
+    # independently of run_case(timeout_s). DLL imports/AV scanning on Windows
+    # can exceed that before any protocol or server logging has started. Only
+    # genuine adapter readiness files get this bounded startup budget; other
+    # waits, process execution deadlines and all protocol verdicts are untouched.
+    if path.name in ("server-ready.json", "client-ready.json"):
+        timeout_s = max(timeout_s, ADAPTER_READY_TIMEOUT_SECONDS)
+    await wait_for_file(path, timeout_s=timeout_s)
 
 
 def register(args):
+    runner.wait_for_file = wait_for_adapter_file
     os.environ["CONFORMANCE_REPO_AIOSENDSPIN"] = str(Path(aiosendspin.__file__).resolve().parent.parent)
     os.environ["CONFORMANCE_REPO_SENDSPIN_CLI"] = args.fixture_repo
     os.environ["SENDSPIN_CONFORMANCE_CLIENT"] = args.client

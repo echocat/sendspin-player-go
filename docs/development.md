@@ -40,7 +40,21 @@ needs network access to download tools and dependencies.
 
 The official harness server launch shim preloads PyAV and NumPy before the
 unchanged upstream adapter starts its timed clip; cold imports must not consume
-its 250-ms playback lead. Playback lifecycle scenarios separately allow up to
+its 250-ms playback lead. The local runner binding allows up to 60 seconds for
+server/client adapter readiness instead of the upstream ten seconds: cold DLL
+imports on Windows can exceed the latter before any server logging starts.
+Only readiness-file waits get this startup budget. Scenario execution remains
+bounded by 30 seconds, other waits are untouched, and no ready files or verdicts
+are fabricated. Missing readiness and cancellation still fail the run.
+
+The reference server's stream control response reports encoded/enqueued samples,
+not SDK receipt or rendering. Codec checks wait for the full decoded sample count
+before checking format, exact hashes and padding; a gated decoder exercises
+delivery after the control response without relying on a fixed settle sleep.
+Out-of-band stream commands also wait for availability/format declarations to
+reach the independent server, rather than relying on local state publication.
+
+Playback lifecycle scenarios separately allow up to
 15 seconds for fresh decoded and nonzero output, then measure the full sustained
 phase with new counters. Before stopping/flushing, they wait at most another
 15 seconds for the required output progress, rather than equating server-side

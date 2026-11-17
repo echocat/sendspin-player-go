@@ -292,6 +292,8 @@ async def configure_peer(config, ready, stop, scope):
                 raise web.HTTPConflict(text="client is not connected")
             client.connection.send_priority_message(b64url_decode(command["data"]))
         elif kind == "status":
+            player = next(iter(client.roles_by_family("player")), None) if client is not None else None
+            player_format = player.preferred_format if player is not None else None
             return web.json_response(
                 {
                     "connected": client is not None and client.is_connected,
@@ -301,6 +303,11 @@ async def configure_peer(config, ready, stop, scope):
                     "pair_finalize_pending": store.pending > 0,
                     "events": events,
                     "client_name": client.info.name if client is not None and client.is_connected else None,
+                    "player_format": {
+                        "sample_rate": player_format.sample_rate,
+                        "channels": player_format.channels,
+                        "bit_depth": player_format.bit_depth,
+                    } if player_format is not None else None,
                 }
             )
         elif kind in ("stream", "more"):
@@ -343,8 +350,9 @@ async def configure_peer(config, ready, stop, scope):
                     )
                 )
                 timestamp += duration
-            await asyncio.sleep(0.8)
             player.on_audio_chunk = original_on_chunk
+            # This response reports encoded/enqueued data, not SDK receipt or
+            # output progress. Callers must wait on their actual observations.
             # The reference encoder may pad its final frame with silence. Count
             # that explicitly, while hashing every original source sample.
             # Use durations of actual role chunks, not endpoint subtraction:
