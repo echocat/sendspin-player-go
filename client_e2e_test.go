@@ -135,6 +135,10 @@ func TestE2EReferenceServer(t *testing.T) {
 				}
 				var mu sync.Mutex
 				var decoded []byte
+				// Hold decoded delivery until the out-of-band control request has
+				// returned. Its response is not a network actor/decoder barrier.
+				// This deterministically exercises the asynchronous receive path.
+				decodeReleased := make(chan struct{})
 				negotiated := ""
 				negotiatedDepth := 0
 				formats := []codec.Format{{Codec: codecName, SampleRate: 48000, Channels: 1, BitDepth: 16}}
@@ -144,7 +148,14 @@ func TestE2EReferenceServer(t *testing.T) {
 				if codecName == "pcm" {
 					formats = append(formats, codec.Format{Codec: "pcm", SampleRate: 48000, Channels: 1, BitDepth: 24})
 				}
-				c, err := New(ctx, Config{Name: "Go RC1 E2E", Store: store, Roles: []Role{Player, Controller, MetadataRole, ColorRole, ArtworkRole, VisualizerRole}, Artwork: []ArtworkChannel{{Source: "album", Format: "png", Width: 32, Height: 32}}, Output: clockOutput{}, CipherSuite: suite, Formats: formats, MinBuffer: 100 * time.Millisecond, Decoded: func(format codec.Format, samples []float32) {
+				// This is a lossless codec/transport oracle, not a low-latency
+				// benchmark. Leave lead for cold reference encoders on busy CI.
+				c, err := New(ctx, Config{Name: "Go RC1 E2E", Store: store, Roles: []Role{Player, Controller, MetadataRole, ColorRole, ArtworkRole, VisualizerRole}, Artwork: []ArtworkChannel{{Source: "album", Format: "png", Width: 32, Height: 32}}, Output: clockOutput{}, CipherSuite: suite, Formats: formats, MinBuffer: 100 * time.Millisecond, RequiredLeadTime: time.Second, Decoded: func(format codec.Format, samples []float32) {
+					select {
+					case <-decodeReleased:
+					case <-ctx.Done():
+						return
+					}
 					mu.Lock()
 					defer mu.Unlock()
 					negotiated = format.Codec
@@ -168,7 +179,20 @@ func TestE2EReferenceServer(t *testing.T) {
 					}
 				})
 				eventually(t, func() bool { return c.Snapshot().Available })
+				// Local publication precedes delivery of client/state. Do not let
+				// the independent HTTP command overtake the server's availability.
+				eventually(t, func() bool { return ref.control(t, map[string]any{"command": "status"})["available"] == true })
 				result := ref.control(t, map[string]any{"command": "stream"})
+				close(decodeReleased)
+				wantSamples := int(result["decoded_samples"].(float64))
+				if wantSamples < 14400 {
+					t.Fatalf("reference encoded too few samples: %d", wantSamples)
+				}
+				eventually(t, func() bool {
+					mu.Lock()
+					defer mu.Unlock()
+					return len(decoded)/2 >= wantSamples
+				})
 				mu.Lock()
 				original := min(len(decoded), 14400*2)
 				sum := sha256.Sum256(decoded[:original])
@@ -179,7 +203,7 @@ func TestE2EReferenceServer(t *testing.T) {
 				if gotCodec != codecName {
 					t.Fatalf("server negotiated %s instead of %s", gotCodec, codecName)
 				}
-				if count != int(result["decoded_samples"].(float64)) || original != 14400*2 || (codecName != "opus" && hex.EncodeToString(sum[:]) != result["pcm_sha256"]) {
+				if count != wantSamples || original != 14400*2 || (codecName != "opus" && hex.EncodeToString(sum[:]) != result["pcm_sha256"]) {
 					t.Fatalf("decoded audio differs: samples=%d want=%v hash=%x want=%s", count, result["decoded_samples"], sum, result["pcm_sha256"])
 				}
 				if codecName != "opus" && !bytes.Equal(padding, make([]byte, len(padding))) {
@@ -198,6 +222,11 @@ func TestE2EReferenceServer(t *testing.T) {
 					if err := c.PreferFormat(ctx, formats[1]); err != nil {
 						t.Fatal(err)
 					}
+					eventually(t, func() bool {
+						status := ref.control(t, map[string]any{"command": "status"})
+						format, ok := status["player_format"].(map[string]any)
+						return ok && format["bit_depth"] == float64(24)
+					})
 					ref.control(t, map[string]any{"command": "more"})
 					eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return negotiatedDepth == 24 })
 				}

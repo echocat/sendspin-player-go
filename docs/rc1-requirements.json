@@ -30233,6 +30233,14 @@
       "reason": "Harness-binding regression: native argument forwarding, including Windows quoting and empty or spaced values. This validates the launch adapter, not an upstream conformance verdict or a protocol obligation."
     },
     {
+      "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EServerShimPreloadsBeforeOfficialAdapter",
+      "reason": "Harness startup regression: slow cold audio imports finish before the original official server scenario, arguments are preserved and import failures remain fatal. The dynamic-port launch seam uses an actual ephemeral listener, publishes its bound port and rejects unexpected/non-loopback addresses. Launch infrastructure only, not a protocol verdict or physical timing claim."
+    },
+    {
+      "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EHarnessReadinessBudget",
+      "reason": "Harness startup policy regression: only adapter readiness gets a bounded cold-start budget, while scenario/process deadlines, other file waits and native verdict functions stay unchanged. Readiness timeouts and cancellation must still propagate; this is infrastructure coverage, not protocol fulfillment evidence."
+    },
+    {
       "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceSourcePCMInputLifecycleAndReconnect",
       "reason": "Explicit opt-in source@v1 extension at the unchanged specification pin. Independent source decoder verifies PCM16, lifecycle/order, timestamps, availability and reconnect with deterministic fake Input; not a promotion of frozen player-only primary assessments or physical ADC evidence. See docs/audio.md#opt-in-source-capture."
     },
@@ -30325,6 +30333,10 @@
       "reason": "One package-scoped private software-only PipeWire daemon covers merged PlaybackLifecycle, ReferenceScenario and ServerLoss subcases, including repeated Go test counts. ServerLoss aborts a native stream without killing or restarting the daemon; it is not a daemon-crash test. This remains separate from generic audio/native hardware evidence and proves no physical output or capture."
     },
     {
+      "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/pipewire#TestE2EPrivateSocketReadinessRequiresListener",
+      "reason": "Private fixture startup regression: a bound Unix socket path is not readiness until listen accepts connections; cancellation still prevents readiness. Software test infrastructure only, not physical audio evidence or primary obligation fulfillment."
+    },
+    {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EReferenceServerFakeInputScenario",
       "reason": "Independent source peer with a deterministic fake input; software-only scenario infrastructure, never authorized physical capture or frozen primary fulfillment evidence."
     },
@@ -30335,6 +30347,10 @@
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EVirtualReferenceServerPlaybackScenario",
       "reason": "Independent reference playback into a virtual output; software-only fixture coverage cannot satisfy generic native hardware evidence."
+    },
+    {
+      "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EScenarioStartupRequiresFreshDecodedAndSignalOutput",
+      "reason": "Playback fixture progress barriers reject decode-only progress, silence, stale counters from a previous phase and output below the sustained threshold. Test infrastructure only, not native hardware or physical synchronization evidence."
     },
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EMissingDeviceConsentStopsBeforeBackendAndPeer",

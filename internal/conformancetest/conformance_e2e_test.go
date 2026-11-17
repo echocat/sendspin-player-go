@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -184,15 +183,6 @@ func officialOutput() string {
 	return string(data)
 }
 
-func freePort() (int, error) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	return port, listener.Close()
-}
-
 func TestE2EOfficialHarness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("official harness is disabled by -short")
@@ -203,17 +193,11 @@ func TestE2EOfficialHarness(t *testing.T) {
 			if official.err != nil {
 				t.Fatalf("official harness setup: %v\n%s", official.err, officialOutput())
 			}
-			serverPort, err := freePort()
-			if err != nil {
-				t.Fatal(err)
-			}
-			clientPort, err := freePort()
-			if err != nil {
-				t.Fatal(err)
-			}
 			official.run++
 			resultsDir := filepath.Join(official.directory, fmt.Sprintf("case-%03d", official.run))
-			request := map[string]any{"scenario_id": scenario, "server_port": serverPort, "client_port": clientPort, "results_dir": resultsDir}
+			// Bind port zero in each adapter itself. Probing and closing a "free"
+			// port here races other package tests and even outbound TCP sockets.
+			request := map[string]any{"scenario_id": scenario, "server_port": 0, "client_port": 0, "results_dir": resultsDir}
 			if err := official.requests.Encode(request); err != nil {
 				t.Fatalf("official harness request: %v\n%s", err, officialOutput())
 			}
