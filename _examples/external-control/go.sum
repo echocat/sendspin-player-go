@@ -23,8 +23,8 @@ github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 h1:h8O1byDZ1uk6RUXMhj1
 github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985/go.mod h1:uiPmbdUbdt1NkGApKl7htQjZ8S7XaGUAVulJUJ9v6q4=
 github.com/miekg/dns v1.1.73 h1:uhT8nJxmTrPJYClxVxTCX+CVn6qnzSiybRk72Z6DgrE=
 github.com/miekg/dns v1.1.73/go.mod h1:RW2Obtfd5NZHvOFe3zYG0W8koWOQtAzyHaLo8vASBuQ=
-github.com/thesyncim/gopus v0.2.2 h1:Ib8mmsLBon6ylXVk6p7fLxuZNnBzfPA4wT4GBzfWqCI=
-github.com/thesyncim/gopus v0.2.2/go.mod h1:uENpqeR6V8WrMhH5vLJARzFgpMgXJBl5M0cg54LgoA0=
+github.com/thesyncim/gopus v0.2.3 h1:dDJksDaQvDP7bg4esCPclud40UMrpc49HK/1x6jssCs=
+github.com/thesyncim/gopus v0.2.3/go.mod h1:rkEZdLUnzw90ZeGzxbmadSF69u6cM+COANn6KX+ceQs=
 golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2/go.mod h1:T9bdIzuCu7OtxOm1hfPfRQxPLYneinmdGuTeoZ9dtd4=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
