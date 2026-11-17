@@ -174,6 +174,7 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 		name                                                               string
 		initialPlayback, candidatePlayback, preferCandidate, wantCandidate bool
 		holdAfterActivation                                                bool
+		receiptBeforeTeardown                                              bool
 	}{
 		{name: "idle-keeps-current"},
 		{name: "goodbye-before-reader-start", holdAfterActivation: true},
@@ -181,9 +182,9 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 		{name: "playback-preempts-idle", candidatePlayback: true, wantCandidate: true},
 		{name: "equal-playback-replaces-current", initialPlayback: true, candidatePlayback: true, wantCandidate: true},
 		{name: "idle-cannot-preempt-playback", initialPlayback: true},
+		{name: "goodbye-receipt-before-teardown", initialPlayback: true, holdAfterActivation: true, receiptBeforeTeardown: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
 			cred, err := NewCredentials()
 			if err != nil {
 				t.Fatal(err)
@@ -191,6 +192,9 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			pskA, pskB := Secret{11}, Secret{22}
 			a := startReference(t, cred, pskA, false)
 			b := startReferenceWithOptions(t, cred, pskB, false, map[string]any{"hold_after_activation": tc.holdAfterActivation})
+			// Provisioning the locked Python runtime has its own startup budget.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			cred.Records = []PairingRecord{{ServerID: a.id, PSK: pskA}, {ServerID: b.id, PSK: pskB}}
 			if tc.preferCandidate {
 				cred.LastPlaybackServer = b.id
@@ -199,7 +203,24 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			if err = store.Save(ctx, cred); err != nil {
 				t.Fatal(err)
 			}
-			client, err := New(ctx, Config{Name: "Arbitration E2E", Store: store, Roles: []Role{Controller}, DisableDiscovery: true})
+			written, release := make(chan struct{}), make(chan struct{})
+			var writeOnce, releaseOnce sync.Once
+			releaseGoodbye := func() { releaseOnce.Do(func() { close(release) }) }
+			defer releaseGoodbye()
+			// Arbitration and best-effort TCP teardown are different assertions.
+			// Hold the test actor after the actual encrypted write until the peer
+			// independently decodes its reason. Never substitute a local event for
+			// peer evidence. The dedicated pre-reader-close case remains unfenced.
+			fenceGoodbye := !tc.holdAfterActivation || tc.receiptBeforeTeardown
+			client, err := New(ctx, Config{Name: "Arbitration E2E", Store: store, Roles: []Role{Controller}, DisableDiscovery: true, Observe: func(message diagnostic.Message) {
+				if fenceGoodbye && message.Direction == diagnostic.Sent && message.Type == "client/goodbye" {
+					writeOnce.Do(func() { close(written) })
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+				}
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +244,18 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 			a.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": tc.initialPlayback})
 			referenceArbitrationReady(t, client, a, tc.initialPlayback)
 			b.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": tc.candidatePlayback})
-			if tc.holdAfterActivation {
+			if tc.receiptBeforeTeardown {
+				eventually(t, func() bool { return referenceEventCount(t, b, "activation_send_held", "") == 1 })
+				select {
+				case <-written:
+				case <-ctx.Done():
+					t.Fatal("goodbye never reached its transmit barrier")
+				}
+				if referenceGoodbyeObserved(t, b, "concurrent_attempt") {
+					t.Fatal("a local write was counted as peer receipt before its reader started")
+				}
+				b.control(t, map[string]any{"command": "release_activation_send"})
+			} else if tc.holdAfterActivation {
 				// Let the client finish its refusal while the reference is still
 				// returning from server/activate, before its normal reader starts.
 				referenceFirstHeldRefusal(t, client, b, endpoint)
@@ -235,6 +267,14 @@ func TestE2EReferenceMultiServerArbitration(t *testing.T) {
 						t.Logf("first refusal: native disconnect callback reason=%v", event["reason"])
 					}
 				}
+			}
+			if fenceGoodbye {
+				peer, reason := b, "concurrent_attempt"
+				if tc.wantCandidate {
+					peer, reason = a, "another_server"
+				}
+				eventually(t, func() bool { return referenceGoodbyeObserved(t, peer, reason) })
+				releaseGoodbye()
 			}
 			if tc.wantCandidate {
 				referenceArbitrationReady(t, client, b, tc.candidatePlayback)

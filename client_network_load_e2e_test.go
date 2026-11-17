@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/echocat/sendspin-player-go/codec"
+	"github.com/echocat/sendspin-player-go/diagnostic"
 	"github.com/echocat/sendspin-player-go/internal/netfault"
 	"github.com/echocat/slf4g/level"
 	"github.com/echocat/slf4g/testing/recording"
@@ -28,7 +29,7 @@ func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 			for i, codecName := range []string{"pcm", "flac", "opus"} {
 				t.Run(fmt.Sprintf("inbound=%v/%s/%s", inbound, suite, codecName), func(t *testing.T) {
 					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
+					t.Cleanup(cancel)
 					cred, err := NewCredentials()
 					if err != nil {
 						t.Fatal(err)
@@ -42,10 +43,19 @@ func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 					}
 					l := recording.NewLogger()
 					l.SetLevel(level.Debug)
-					var samples atomic.Int64
+					var samples, encoded, clockReplies atomic.Int64
 					c, err := New(ctx, Config{Name: "Private network campaign", Store: store, Roles: []Role{Player, Controller}, Output: clockOutput{}, DisableDiscovery: true, CipherSuite: suite,
-						Logger: l, MinBuffer: 150 * time.Millisecond, RequiredLeadTime: 200 * time.Millisecond,
+						// This tests delivery/recovery, not a 200-ms latency target.
+						// Leave lead for encoding and paced delivery of the short clip
+						// on a busy host, without changing the impairment profile.
+						Logger: l, MinBuffer: 150 * time.Millisecond, RequiredLeadTime: time.Second,
 						Formats: []codec.Format{{Codec: codecName, SampleRate: 48000, Channels: 1, BitDepth: 16}, {Codec: "pcm", SampleRate: 48000, Channels: 1, BitDepth: 24}},
+						Encoded: func(diagnostic.AudioChunk) { encoded.Add(1) },
+						Observe: func(message diagnostic.Message) {
+							if message.Direction == diagnostic.Received && message.Type == "server/time" {
+								clockReplies.Add(1)
+							}
+						},
 						Decoded: func(_ codec.Format, x []float32) { samples.Add(int64(len(x))) }})
 					if err != nil {
 						t.Fatal(err)
@@ -61,13 +71,8 @@ func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer proxy.Close()
+					t.Cleanup(proxy.Close)
 					stage := "startup"
-					t.Cleanup(func() {
-						if t.Failed() {
-							t.Logf("campaign stage=%s accepted=%d active=%d samples=%d", stage, proxy.Accepted(), proxy.Active(), samples.Load())
-						}
-					})
 					endpoint := "ws://" + proxy.Address() + "/sendspin"
 					done := make(chan error, 1)
 					var joinOnce sync.Once
@@ -91,7 +96,39 @@ func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 						go func() { done <- c.Run(ctx, endpoint) }()
 						t.Cleanup(join)
 					}
-					eventually(t, func() bool { return c.Snapshot().Available })
+					// Register after join/Close so failures are captured while the
+					// session is still live, not after cleanup erased the evidence.
+					t.Cleanup(func() {
+						if t.Failed() {
+							state := c.Snapshot()
+							t.Logf("campaign stage=%s accepted=%d active=%d clock_replies=%d encoded_chunks=%d samples=%d available=%t streams=%v", stage, proxy.Accepted(), proxy.Active(), clockReplies.Load(), encoded.Load(), samples.Load(), state.Available, state.ActiveStreams)
+							for {
+								select {
+								case event := <-c.Events():
+									t.Logf("campaign event: kind=%s error_class=%s", event.Kind, logErrorClass(event.Err))
+								default:
+									return
+								}
+							}
+						}
+					})
+					// Readiness may first converge partway through a later startup
+					// burst. Fence a complete eight-exchange burst, and retry the
+					// marker if clock replies advanced while it crossed the link.
+					// The actor must apply that whole model update before the clip.
+					var startupReplies int64
+					var startupMarker string
+					eventually(t, func() bool {
+						replies, state := clockReplies.Load(), c.Snapshot()
+						if startupMarker != "" && replies == startupReplies && state.Available && state.Group.Name == startupMarker {
+							return true
+						}
+						if replies >= 8 && replies%8 == 0 && replies != startupReplies && state.Available {
+							startupReplies = replies
+							startupMarker = ref.control(t, map[string]any{"command": "barrier"})["marker"].(string)
+						}
+						return false
+					})
 					if err = c.SetVolume(ctx, 37); err != nil {
 						t.Fatal(err)
 					}
@@ -99,9 +136,13 @@ func TestE2EReferenceImpairedTransportRecoveryAndCancellation(t *testing.T) {
 					// The out-of-band HTTP stream command must not overtake the
 					// independent server's receipt of available=true client/state.
 					eventually(t, func() bool { return ref.control(t, map[string]any{"command": "status"})["available"] == true })
-					ref.control(t, map[string]any{"command": "stream"})
+					result := ref.control(t, map[string]any{"command": "stream"})
+					wantSamples := int64(result["decoded_samples"].(float64))
+					if wantSamples < 14400 {
+						t.Fatal("reference encoded too few samples", wantSamples)
+					}
 					stage = "media"
-					eventually(t, func() bool { return samples.Load() >= 14400 })
+					eventually(t, func() bool { return samples.Load() >= wantSamples })
 					proxy.DropConnections()
 					stage = "recovery"
 					if inbound {

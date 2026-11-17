@@ -30234,7 +30234,7 @@
     },
     {
       "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EServerShimPreloadsBeforeOfficialAdapter",
-      "reason": "Harness startup regression: slow cold audio imports finish before launching the unchanged official server adapter, arguments are preserved and import failures remain fatal. Launch infrastructure only, not a protocol verdict or physical timing claim."
+      "reason": "Harness startup regression: slow cold audio imports finish before the original official server scenario, arguments are preserved and import failures remain fatal. The dynamic-port launch seam uses an actual ephemeral listener, publishes its bound port and rejects unexpected/non-loopback addresses. Launch infrastructure only, not a protocol verdict or physical timing claim."
     },
     {
       "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EHarnessReadinessBudget",

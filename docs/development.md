@@ -46,6 +46,11 @@ imports on Windows can exceed the latter before any server logging starts.
 Only readiness-file waits get this startup budget. Scenario execution remains
 bounded by 30 seconds, other waits are untouched, and no ready files or verdicts
 are fabricated. Missing readiness and cancellation still fail the run.
+Both adapters bind port zero themselves. The server launch seam publishes the
+actual aiohttp listener port before the original scenario writes registry and
+readiness URLs; the Go client already publishes its listener address. No port is
+probed and released ahead of startup. The shim's version-pinned binding and
+loopback-only address validation have a real-listener regression.
 
 The reference server's stream control response reports encoded/enqueued samples,
 not SDK receipt or rendering. Codec checks wait for the full decoded sample count
@@ -53,6 +58,20 @@ before checking format, exact hashes and padding; a gated decoder exercises
 delivery after the control response without relying on a fixed settle sleep.
 Out-of-band stream commands also wait for availability/format declarations to
 reach the independent server, rather than relying on local state publication.
+
+Arbitration scenarios fence the test actor after an encrypted goodbye write
+until the independent peer has decoded its reason, before allowing teardown.
+A delayed-reader regression verifies that a local write is not counted as peer
+receipt. The separate close-before-reader-start case remains unfenced. These
+checks do not claim guaranteed delivery after the SDK's best-effort TCP close.
+
+The paced transport campaign waits for a complete eight-exchange startup burst
+and a same-direction actor marker before starting its short clip. If more clock
+replies arrive during the marker, it fences the next completed burst. It
+advertises a one-second encoding/delivery lead, not a low-latency target, and requires the
+reference's complete decoded sample count (including encoder padding). Pacing,
+connection-drop and cancellation assertions are unchanged. Failure diagnostics
+capture clock/encoded/decoded counters before closing the session or proxy.
 
 Playback lifecycle scenarios separately allow up to
 15 seconds for fresh decoded and nonzero output, then measure the full sustained
