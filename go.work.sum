@@ -1,0 +1,13 @@
+github.com/d4l3k/messagediff v1.2.2-0.20190829033028-7e0a312ae40b h1:02XNVBBC2x90C1IKnZ0iyrIxL1pdIRsusn0lqSEIOD0=
+github.com/d4l3k/messagediff v1.2.2-0.20190829033028-7e0a312ae40b/go.mod h1:Oozbb1TVXFac9FtSIxHBMnBCq2qeH/2KkEQxENCrlLo=
+github.com/jszwec/csvutil v1.10.0 h1:upMDUxhQKqZ5ZDCs/wy+8Kib8rZR8I8lOR34yJkdqhI=
+github.com/jszwec/csvutil v1.10.0/go.mod h1:/E4ONrmGkwmWsk9ae9jpXnv9QT8pLHEPcCirMFhxG9I=
+github.com/kr/pty v1.1.1 h1:VkoXIwSboBpnk99O/KFauAEILuNHv5DVFKZMBN/gUgw=
+github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
+github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
+golang.org/x/image v0.41.0 h1:8wS72eGJMJaBxK6okTzd4WaXumUlTVlb753MlsSvTCo=
+golang.org/x/image v0.41.0/go.mod h1:uIc348UZMSvS5Z65CVZ7iDPaNobNFEPeJ4kbqTOszmA=
+golang.org/x/term v0.48.0 h1:G6UU1eiSB8nl3DzeUGt7Mg+2SctI8tPS6Z5/mBt6cOk=
+golang.org/x/term v0.48.0/go.mod h1:BRDLHCZr2SUjIeBHHpRyQeC9xzSAVbzY2rvKgafnHf4=
+golang.org/x/text v0.44.0 h1:YItdp/mQNGnsmrgpcdA5yQ3bnRxCfo/Tj/iByGW9GGo=
+golang.org/x/text v0.44.0/go.mod h1:S4FR1waQ9LbjQTls97SyRjDaUUVkaM+cXwwuG/G+MwY=

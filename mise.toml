@@ -6,6 +6,10 @@ lockfile = true
 go = "1.27.4"
 uv = "0.13.8"
 
+# The workspace coordinates dependency updates, not module validation.
+[env]
+GOWORK = "off"
+
 [task_templates.go_test]
 usage = '''
 flag "--race" help="Enable the Go race detector" default=#false

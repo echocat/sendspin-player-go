@@ -12,6 +12,19 @@ The SDK, audio backends and internal Go tools share the root module.
 Each [example](../_examples/README.md) has its own module and a local replacement
 pointing to the root SDK; root `go test ./...` does not include those modules.
 
+The committed `go.work` lists the SDK and all example modules so Dependabot can
+update and tidy them together through its single root-directory configuration.
+When adding an example module, also add it to `go.work`; an ordinary test checks
+that the workspace covers every discovered example.
+
+All mise tasks set `GOWORK=off`, and the example dispatcher also disables workspace
+mode. Tests, lint and builds therefore validate each module's own dependencies;
+the workspace cannot hide missing requirements. Strict `go mod tidy -diff` checks
+remain enabled. To synchronize dependencies manually, run `go work sync` outside
+mise with workspace mode enabled, then run `mise format` to tidy all modules.
+Finally, run `go list -m all` with workspace mode enabled to refresh the committed
+`go.work.sum` for the final dependency graph.
+
 ## Common tasks
 
 | Command | Purpose |

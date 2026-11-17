@@ -16,9 +16,8 @@ updates:
           - "github/codeql-action/*"
 
   - package-ecosystem: "gomod"
-    directories:
-      - "/"
-      - "/_examples/*"
+    # go.work makes Dependabot update and tidy all local modules together.
+    directory: "/"
     schedule:
       interval: "daily"
     allow:
