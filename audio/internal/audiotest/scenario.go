@@ -158,6 +158,7 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 			t.Error("native output cleanup failed", state)
 		}
 	}()
+	count := func(name string) int64 { decodedMu.Lock(); defer decodedMu.Unlock(); return decoded[name] }
 	wait := func(description string, condition func() bool) {
 		t.Helper()
 		timer := time.NewTimer(15 * time.Second)
@@ -173,7 +174,8 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 				done <- e
 				t.Fatalf("SDK session ended while waiting for %s: %v", description, e)
 			case <-timer.C:
-				t.Fatal("timeout waiting for", description)
+				state := client.Snapshot()
+				t.Fatalf("timeout waiting for %s: output=%+v decoded_pcm=%d decoded_flac=%d available=%t streams=%v", description, output.stats(), count("pcm"), count("flac"), state.Available, state.ActiveStreams)
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			case <-tick.C:
@@ -188,7 +190,6 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 		}
 		return r
 	}
-	count := func(name string) int64 { decodedMu.Lock(); defer decodedMu.Unlock(); return decoded[name] }
 	wait("authenticated available player", func() bool { return client.Snapshot().Available && connections.Load() == 1 })
 	durations := []time.Duration{60 * time.Second, 30 * time.Second, 30 * time.Second, 60 * time.Second}
 	if virtual || config.SoftwareFixture {
@@ -201,11 +202,20 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 		decodedBefore := count(codecName)
 		sourceBefore := int64(command("weak_start")["source_frames"].(float64))
 		started := time.Now()
+		// A control response confirms producer creation, not render progress.
+		// Allow a bounded startup for scheduling/clock convergence on busy CI
+		// hosts, then require the full sustained phase below. Decoding alone or
+		// silence from an earlier phase must never satisfy this barrier.
+		wait("first decoded and nonzero output for "+name, func() bool {
+			return scenarioPlaybackProgress(before, output.stats(), decodedBefore, count(codecName), 1)
+		})
+		steadyBefore := output.stats()
+		steadyDecodedBefore := count(codecName)
 		tick := time.NewTicker(500 * time.Millisecond)
 		defer tick.Stop()
 		deadline := time.NewTimer(duration)
 		defer deadline.Stop()
-		last := before.Frames
+		last := steadyBefore.Frames
 		advanced := time.Now()
 	loop:
 		for {
@@ -231,6 +241,18 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 				}
 			}
 		}
+		// Server-side role drain is a transport barrier, not an output-device
+		// drain. Reach the same minimum progress before weak_stop sends the
+		// destructive stream/end/flush; a wall-clock deadline alone can race
+		// queued playback, particularly after a codec change.
+		minimumFrames := int64(duration.Seconds() * 24000)
+		wait("sustained decoded and nonzero output for "+name, func() bool {
+			state := output.stats()
+			if state.Failures > 0 || invalid.Load() || !client.Snapshot().Available {
+				t.Fatal("playback health check failed", state)
+			}
+			return scenarioPlaybackProgress(steadyBefore, state, steadyDecodedBefore, count(codecName), minimumFrames)
+		})
 		sourceAfter := int64(command("weak_stop")["source_frames"].(float64))
 		wait("stream stop/flush", func() bool {
 			return !slices.Contains(client.Snapshot().ActiveStreams, "player") && output.flushes.Load() > before.Flushes
@@ -238,7 +260,7 @@ func runReferenceServerPlaybackScenario(t *testing.T, config ScenarioConfig, vir
 		after := output.stats()
 		entry := scenarioPhase{name, codecName, time.Since(started).Seconds(), sourceAfter - sourceBefore, count(codecName) - decodedBefore, after.Frames - before.Frames, after.SignalWrites - before.SignalWrites}
 		receipt.Phases = append(receipt.Phases, entry)
-		if entry.DecodedFrames < int64(duration.Seconds()*24000) || entry.OutputFrames < int64(duration.Seconds()*24000) || entry.SignalWrites == 0 {
+		if !scenarioPlaybackProgress(steadyBefore, after, steadyDecodedBefore, count(codecName), minimumFrames) {
 			t.Fatal("insufficient decoded/native playback progress", entry)
 		}
 	}

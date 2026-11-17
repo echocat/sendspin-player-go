@@ -38,6 +38,16 @@ Go E2E helpers bootstrap the pinned Python reference environments automatically;
 no separate Python setup or manual service startup is needed. Initial bootstrap
 needs network access to download tools and dependencies.
 
+The official harness server launch shim preloads PyAV and NumPy before the
+unchanged upstream adapter starts its timed clip; cold imports must not consume
+its 250-ms playback lead. Playback lifecycle scenarios separately allow up to
+15 seconds for fresh decoded and nonzero output, then measure the full sustained
+phase with new counters. Before stopping/flushing, they wait at most another
+15 seconds for the required output progress, rather than equating server-side
+transport drain with device playback. Startup time cannot satisfy the progress
+threshold; missing output still fails. These are software progress checks, not
+latency guarantees.
+
 Discovery E2E tests need a running Linux Podman or Docker engine; on Windows/macOS,
 start its Linux VM first. Multicast stays inside isolated container networks,
 not on the host LAN. The optional live time-filter comparison needs a

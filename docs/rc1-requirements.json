@@ -30233,6 +30233,10 @@
       "reason": "Harness-binding regression: native argument forwarding, including Windows quoting and empty or spaced values. This validates the launch adapter, not an upstream conformance verdict or a protocol obligation."
     },
     {
+      "id": "harness:github.com/echocat/sendspin-player-go/internal/conformancetest#TestE2EServerShimPreloadsBeforeOfficialAdapter",
+      "reason": "Harness startup regression: slow cold audio imports finish before launching the unchanged official server adapter, arguments are preserved and import failures remain fatal. Launch infrastructure only, not a protocol verdict or physical timing claim."
+    },
+    {
       "id": "e2e:github.com/echocat/sendspin-player-go#TestE2EReferenceSourcePCMInputLifecycleAndReconnect",
       "reason": "Explicit opt-in source@v1 extension at the unchanged specification pin. Independent source decoder verifies PCM16, lifecycle/order, timestamps, availability and reconnect with deterministic fake Input; not a promotion of frozen player-only primary assessments or physical ADC evidence. See docs/audio.md#opt-in-source-capture."
     },
@@ -30335,6 +30339,10 @@
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EVirtualReferenceServerPlaybackScenario",
       "reason": "Independent reference playback into a virtual output; software-only fixture coverage cannot satisfy generic native hardware evidence."
+    },
+    {
+      "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EScenarioStartupRequiresFreshDecodedAndSignalOutput",
+      "reason": "Playback fixture progress barriers reject decode-only progress, silence, stale counters from a previous phase and output below the sustained threshold. Test infrastructure only, not native hardware or physical synchronization evidence."
     },
     {
       "id": "desktop-audio-e2e:github.com/echocat/sendspin-player-go/audio/internal/audiotest#TestE2EMissingDeviceConsentStopsBeforeBackendAndPeer",

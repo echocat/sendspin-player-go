@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echocat/sendspin-player-go/audio"
+	"github.com/echocat/sendspin-player-go/internal/monotime"
 )
 
 type scenarioOutputStats struct {
@@ -23,8 +24,12 @@ func (o *scenarioOutput) stats() scenarioOutputStats {
 	return scenarioOutputStats{o.opens.Load(), o.closes.Load(), o.writes.Load(), o.frames.Load(), o.signalWrites.Load(), o.flushes.Load(), o.failures.Load()}
 }
 
-// Same bounded wall-clock fake used conceptually by the root E2E tests. This
-// is only a software validation option, never a fallback for a failed ALSA open.
+func scenarioPlaybackProgress(before, after scenarioOutputStats, decodedBefore, decodedAfter, frames int64) bool {
+	return decodedAfter-decodedBefore >= frames && after.Frames-before.Frames >= frames && after.SignalWrites > before.SignalWrites
+}
+
+// Use the renderer's process clock (QPC on Windows), not a second time domain.
+// This is only a software validation option, never a fallback for a failed ALSA open.
 type scenarioClockOutput struct{}
 type scenarioClockDevice struct{ next time.Time }
 
@@ -32,14 +37,14 @@ func (scenarioClockOutput) Open(context.Context, audio.Format) (audio.Device, er
 	return &scenarioClockDevice{}, nil
 }
 func (d *scenarioClockDevice) Next(ctx context.Context) (time.Time, error) {
-	if d.next.Before(time.Now()) {
-		d.next = time.Now()
+	if now := monotime.Now(); d.next.Before(now) {
+		d.next = now
 	}
 	return d.next, ctx.Err()
 }
 func (d *scenarioClockDevice) Write(ctx context.Context, s []float32) error {
 	d.next = d.next.Add(time.Duration(len(s)/2) * time.Second / 48000)
-	if wait := time.Until(d.next) - 40*time.Millisecond; wait > 0 {
+	if wait := monotime.Until(d.next) - 40*time.Millisecond; wait > 0 {
 		timer := time.NewTimer(wait)
 		defer timer.Stop()
 		select {

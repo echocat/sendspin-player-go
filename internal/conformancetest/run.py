@@ -25,6 +25,10 @@ def register(args):
     os.environ["CONFORMANCE_REPO_SENDSPIN_CLI"] = args.fixture_repo
     os.environ["SENDSPIN_CONFORMANCE_CLIENT"] = args.client
     os.environ["PYTHONPATH"] = str(Path(__file__).resolve().parent) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    server = IMPLEMENTATIONS["aiosendspin"]
+    IMPLEMENTATIONS["aiosendspin"] = dataclasses.replace(
+        server, server=dataclasses.replace(server.server, entrypoint="sdk_server"),
+    )
     IMPLEMENTATIONS[IMPLEMENTATION] = ImplementationSpec(
         name=IMPLEMENTATION,
         display_name="sendspin-player-go SDK",
