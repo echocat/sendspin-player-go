@@ -110,6 +110,24 @@ func referenceFirstHeldRefusal(t *testing.T, client *Client, ref referenceServer
 	}
 }
 
+// referenceGoodbyeBarrier keeps best-effort socket teardown from racing the
+// independent peer's reader. The caller must still verify the peer's decoded
+// reason before releasing it; a completed local write is not receipt evidence.
+func referenceGoodbyeBarrier(ctx context.Context) (diagnostic.Observer, <-chan struct{}, func()) {
+	written, release := make(chan struct{}), make(chan struct{})
+	var writeOnce, releaseOnce sync.Once
+	observe := func(message diagnostic.Message) {
+		if message.Direction == diagnostic.Sent && message.Type == "client/goodbye" {
+			writeOnce.Do(func() { close(written) })
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	return observe, written, func() { releaseOnce.Do(func() { close(release) }) }
+}
+
 func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -129,7 +147,10 @@ func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T
 	var enterOnce, releaseOnce sync.Once
 	resume := func() { releaseOnce.Do(func() { close(release) }) }
 	defer resume()
+	observeGoodbye, _, releaseGoodbye := referenceGoodbyeBarrier(ctx)
+	defer releaseGoodbye()
 	client, err := New(ctx, Config{Name: "Pair-init admission race", Store: store, Roles: []Role{Controller}, DisableDiscovery: true, Observe: func(message diagnostic.Message) {
+		observeGoodbye(message)
 		// Noise bodies are a separate type. The first encrypted redacted
 		// control message here is the native PSK flow's actual pair-init.
 		if message.Direction == diagnostic.Sent && message.Encrypted && message.Type == "redacted/control" {
@@ -154,6 +175,7 @@ func TestE2EReferencePairingProtectionStartsBeforeFirstWriteReturns(t *testing.T
 	}
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
 	eventually(t, func() bool { return referenceGoodbyeObserved(t, playback, "concurrent_attempt") })
+	releaseGoodbye()
 	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("already transmitted pair-init was displaced")
@@ -461,20 +483,34 @@ func referenceConcurrentPeersKeepControllerObservationsIsolated(t *testing.T) {
 }
 
 func TestE2EReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
-	ctx := context.Background()
+	t.Run("normal-reader", func(t *testing.T) {
+		referencePairingAttemptCannotBeDisplacedByPlayback(t, false)
+	})
+	t.Run("delayed-reader", func(t *testing.T) {
+		referencePairingAttemptCannotBeDisplacedByPlayback(t, true)
+	})
+}
+
+func referencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T, holdAfterActivation bool) {
+	t.Helper()
 	cred, err := NewCredentials()
 	if err != nil {
 		t.Fatal(err)
 	}
 	psk := Secret{33}
 	pairing := startReferenceWithOptions(t, cred, cred.PairingPSK, true, map[string]any{"hold_pairing": true})
-	playback := startReference(t, cred, psk, false)
+	playback := startReferenceWithOptions(t, cred, psk, false, map[string]any{"hold_after_activation": holdAfterActivation})
+	// Runtime provisioning has its own budget, separate from protocol barriers.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	cred.Records = []PairingRecord{{ServerID: playback.id, PSK: psk}}
 	store := &MemoryStore{}
 	if err = store.Save(ctx, cred); err != nil {
 		t.Fatal(err)
 	}
-	client, err := New(ctx, Config{Name: "Protected pairing", Store: store, Roles: []Role{Controller}, DisableDiscovery: true})
+	observeGoodbye, written, releaseGoodbye := referenceGoodbyeBarrier(ctx)
+	defer releaseGoodbye()
+	client, err := New(ctx, Config{Name: "Protected pairing", Store: store, Roles: []Role{Controller}, DisableDiscovery: true, Observe: observeGoodbye})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +520,20 @@ func TestE2EReferencePairingAttemptCannotBeDisplacedByPlayback(t *testing.T) {
 		return pairing.control(t, map[string]any{"command": "status"})["pair_finalize_pending"] == true
 	})
 	playback.control(t, map[string]any{"command": "connect", "url": endpoint, "playback": true})
+	if holdAfterActivation {
+		eventually(t, func() bool { return referenceEventCount(t, playback, "activation_send_held", "") == 1 })
+		select {
+		case <-written:
+		case <-ctx.Done():
+			t.Fatal("goodbye never reached its transmit barrier")
+		}
+		if referenceGoodbyeObserved(t, playback, "concurrent_attempt") {
+			t.Fatal("a local write was counted as peer receipt before its reader started")
+		}
+		playback.control(t, map[string]any{"command": "release_activation_send"})
+	}
 	eventually(t, func() bool { return referenceGoodbyeObserved(t, playback, "concurrent_attempt") })
+	releaseGoodbye()
 	eventually(t, func() bool { return referenceEventCount(t, playback, "disconnected", "") > 0 })
 	if client.Snapshot().ServerID != pairing.id {
 		t.Fatal("in-progress pairing displaced")
