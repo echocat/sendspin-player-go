@@ -7,7 +7,7 @@ require github.com/echocat/sendspin-player-go v0.0.0
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
-	github.com/echocat/slf4g v1.9.0 // indirect
+	github.com/echocat/slf4g v1.9.1 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/mewkiz/flac v1.0.14 // indirect
