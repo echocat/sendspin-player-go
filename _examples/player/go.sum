@@ -6,8 +6,8 @@ github.com/ebitengine/purego v0.11.3 h1:OB+JLpdm7ioymhyA+6s5kbb/uOuYycAgL8NNTFc5
 github.com/ebitengine/purego v0.11.3/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
 github.com/echocat/slf4g v1.9.1 h1:bzS4btSdr4OaoCS0jhXrTzr03nAUfmf45DegWMW7+Wg=
 github.com/echocat/slf4g v1.9.1/go.mod h1:WhUEWD/lCkvO5jYIXV7Y4Iaam2t2rKfRHUJf73ef3TI=
-github.com/echocat/slf4g/native v1.9.0 h1:u+l6UmWXTZ99Z53VawPB+vupDZHF6YmG/p919b43FrE=
-github.com/echocat/slf4g/native v1.9.0/go.mod h1:tgpmGHgRWSdgCjzSP4WjFgYUyguM+HaHJ0/2d8VmLdM=
+github.com/echocat/slf4g/native v1.9.1 h1:h8PAgJmPylNcJY95IZ9HIyBNhfXKubjJ2Fr0UAXAwlg=
+github.com/echocat/slf4g/native v1.9.1/go.mod h1:8X1MV6IEyNrnC8ZwQrzHQoKKRb4TY228we8PHmyk05E=
 github.com/flynn/noise v1.1.0 h1:KjPQoQCEFdZDiP03phOvGi11+SVVhBG2wOWAorLsstg=
 github.com/flynn/noise v1.1.0/go.mod h1:xbMo+0i6+IGbYdJhF31t2eR1BIU0CYc12+BNAKwUTag=
 github.com/icza/bitio v1.1.0 h1:ysX4vtldjdi3Ygai5m1cWy4oLkhWTAi+SyO6HC8L9T0=
