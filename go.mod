@@ -6,7 +6,7 @@ require (
 	filippo.io/edwards25519 v1.2.0
 	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.3
-	github.com/echocat/slf4g v1.9.0
+	github.com/echocat/slf4g v1.9.1
 	github.com/flynn/noise v1.1.0
 	github.com/mewkiz/flac v1.0.14
 	github.com/miekg/dns v1.1.73
